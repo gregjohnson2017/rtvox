@@ -9,6 +9,14 @@ use vulkano::{
     image::ImageUsage,
     impl_vertex,
     instance::{Instance, InstanceCreateInfo},
+    pipeline::{
+        graphics::{
+            input_assembly::InputAssemblyState, vertex_input::BuffersDefinition,
+            viewport::ViewportState,
+        },
+        GraphicsPipeline,
+    },
+    render_pass::Subpass,
     swapchain::{Swapchain, SwapchainCreateInfo},
 };
 use vulkano_win::VkSurfaceBuild;
@@ -88,19 +96,14 @@ fn main() {
             surface.clone(),
             SwapchainCreateInfo {
                 min_image_count: surface_capabilities.min_image_count,
-
                 image_format,
-
                 image_extent: surface.window().inner_size().into(),
-
                 image_usage: ImageUsage::color_attachment(),
-
                 composite_alpha: surface_capabilities
                     .supported_composite_alpha
                     .iter()
                     .next()
                     .unwrap(),
-
                 ..Default::default()
             },
         )
@@ -157,6 +160,33 @@ fn main() {
 
     let vs = vs::load(device.clone()).unwrap();
     let fs = fs::load(device.clone()).unwrap();
+
+    let render_pass = vulkano::single_pass_renderpass!(
+        device.clone(),
+        attachments: {
+            color: {
+                load: Clear,
+                store: Store,
+                format: swapchain.image_format(),
+                samples: 1,
+            }
+        },
+        pass: {
+            color: [color],
+            depth_stencil: {}
+        }
+    )
+    .unwrap();
+
+    let pipeline = GraphicsPipeline::start()
+        .render_pass(Subpass::from(render_pass.clone(), 0).unwrap())
+        .vertex_input_state(BuffersDefinition::new().vertex::<Vertex>())
+        .input_assembly_state(InputAssemblyState::new())
+        .vertex_shader(vs.entry_point("main").unwrap(), ())
+        .viewport_state(ViewportState::viewport_dynamic_scissor_irrelevant())
+        .fragment_shader(fs.entry_point("main").unwrap(), ())
+        .build(device.clone())
+        .unwrap();
 
     event_loop.run(move |event, _, control_flow| {
         *control_flow = ControlFlow::Wait;
