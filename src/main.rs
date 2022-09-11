@@ -1,27 +1,16 @@
 use std::sync::Arc;
 
-use bytemuck::{Pod, Zeroable};
 use vulkano::{
-    buffer::{BufferUsage, CpuAccessibleBuffer, TypedBufferAccess},
-    command_buffer::{
-        AutoCommandBufferBuilder, CommandBufferUsage, RenderPassBeginInfo, SubpassContents,
-    },
+    command_buffer::{AutoCommandBufferBuilder, CommandBufferUsage},
+    descriptor_set::{PersistentDescriptorSet, WriteDescriptorSet},
     device::{
         physical::{PhysicalDevice, PhysicalDeviceType},
-        Device, DeviceCreateInfo, DeviceExtensions, QueueCreateInfo,
+        Device, DeviceCreateInfo, DeviceExtensions, Queue, QueueCreateInfo,
     },
-    image::{view::ImageView, ImageAccess, ImageUsage, SwapchainImage},
-    impl_vertex,
+    format::Format,
+    image::{view::ImageView, ImageAccess, ImageUsage, StorageImage},
     instance::{Instance, InstanceCreateInfo},
-    pipeline::{
-        graphics::{
-            input_assembly::InputAssemblyState,
-            vertex_input::BuffersDefinition,
-            viewport::{Viewport, ViewportState},
-        },
-        GraphicsPipeline,
-    },
-    render_pass::{Framebuffer, FramebufferCreateInfo, RenderPass, Subpass},
+    pipeline::{ComputePipeline, Pipeline},
     swapchain::{
         acquire_next_image, AcquireError, Swapchain, SwapchainCreateInfo, SwapchainCreationError,
     },
@@ -31,15 +20,56 @@ use vulkano_win::VkSurfaceBuild;
 use winit::{
     event::{Event, WindowEvent},
     event_loop::{ControlFlow, EventLoop},
-    window::{Window, WindowBuilder},
+    window::WindowBuilder,
 };
 
+struct ComputeRunner {
+    storage_image: Arc<ImageView<StorageImage>>,
+}
+
+impl ComputeRunner {
+    fn new(queue: Arc<Queue>, size: [u32; 2]) -> ComputeRunner {
+        let storage_image: Arc<ImageView<StorageImage>> = StorageImage::general_purpose_image_view(
+            queue.clone(),
+            size,
+            Format::R8G8B8A8_UNORM,
+            ImageUsage {
+                sampled: true,
+                transfer_dst: true,
+                storage: true,
+                color_attachment: true,
+                ..ImageUsage::none()
+            },
+        )
+        .unwrap();
+
+        ComputeRunner { storage_image }
+    }
+
+    fn storage_image(&self) -> Arc<ImageView<StorageImage>> {
+        self.storage_image.clone()
+    }
+}
+
 fn main() {
-    // window.raw_window_handle();
+    /*
+    match vulkano::instance::layers_list() {
+        Ok(iter) => {
+            iter.for_each(|p| {
+                println!("{}", p.name());
+            });
+        }
+        Err(err) => {
+            println!("LayersListError: {:?}", err);
+            return;
+        }
+    }
+    */
     let required_extensions = vulkano_win::required_extensions();
     let instance = Instance::new(InstanceCreateInfo {
         enabled_extensions: required_extensions,
         enumerate_portability: true,
+        enabled_layers: vec![String::from("VK_LAYER_LUNARG_monitor")],
         ..Default::default()
     })
     .unwrap();
@@ -107,7 +137,10 @@ fn main() {
                 min_image_count: surface_capabilities.min_image_count,
                 image_format,
                 image_extent: surface.window().inner_size().into(),
-                image_usage: ImageUsage::color_attachment(),
+                image_usage: ImageUsage {
+                    storage: true,
+                    ..ImageUsage::color_attachment()
+                },
                 composite_alpha: surface_capabilities
                     .supported_composite_alpha
                     .iter()
@@ -119,38 +152,23 @@ fn main() {
         .unwrap()
     };
 
-    #[repr(C)]
-    #[derive(Clone, Copy, Debug, Default, Zeroable, Pod)]
-    struct Vertex {
-        position: [f32; 2],
-    }
-    impl_vertex!(Vertex, position);
-
-    let vertices = [
-        Vertex {
-            position: [-0.5, -0.25],
-        },
-        Vertex {
-            position: [0.0, 0.5],
-        },
-        Vertex {
-            position: [0.25, -0.1],
-        },
-    ];
-    let vertex_buffer =
-        CpuAccessibleBuffer::from_iter(device.clone(), BufferUsage::all(), false, vertices)
-            .unwrap();
+    let compute_runner = ComputeRunner::new(queue.clone(), images[0].dimensions().width_height());
 
     mod vs {
         vulkano_shaders::shader! {
             ty: "vertex",
             src: "
-				#version 450
-				layout(location = 0) in vec2 position;
-				void main() {
-					gl_Position = vec4(position, 0.0, 1.0);
-				}
-			"
+                #version 450
+
+                layout(location=0) in vec2 position;
+                layout(location=1) in vec2 tex_coords;
+                layout(location = 0) out vec2 f_tex_coords;
+
+                void main() {
+                    gl_Position =  vec4(position, 0.0, 1.0);
+                    f_tex_coords = tex_coords;
+                }
+            "
         }
     }
 
@@ -158,55 +176,50 @@ fn main() {
         vulkano_shaders::shader! {
             ty: "fragment",
             src: "
-				#version 450
-				layout(location = 0) out vec4 f_color;
-				void main() {
-					f_color = vec4(1.0, 0.0, 0.0, 1.0);
-				}
-			"
+                #version 450
+
+                layout(location = 0) in vec2 v_tex_coords;
+                layout(location = 0) out vec4 f_color;
+                layout(set = 0, binding = 0) uniform sampler2D tex;
+
+                void main() {
+                    f_color = texture(tex, v_tex_coords);
+                }
+            "
+        }
+    }
+
+    mod cs {
+        vulkano_shaders::shader! {
+            ty: "compute",
+            src: "
+                #version 450
+
+                layout(set = 0, binding = 0, rgba8) uniform writeonly image2D img;
+
+                void main() {
+                    imageStore(img, ivec2(gl_GlobalInvocationID.xy), vec4(255, 255, 255, 0));
+                }
+            "
         }
     }
 
     let vs = vs::load(device.clone()).unwrap();
     let fs = fs::load(device.clone()).unwrap();
+    let cs = cs::load(device.clone()).unwrap();
 
-    let render_pass = vulkano::single_pass_renderpass!(
+    let compute_pipeline = ComputePipeline::new(
         device.clone(),
-        attachments: {
-            color: {
-                load: Clear,
-                store: Store,
-                format: swapchain.image_format(),
-                samples: 1,
-            }
-        },
-        pass: {
-            color: [color],
-            depth_stencil: {}
-        }
+        cs.entry_point("main").unwrap(),
+        &(),
+        None,
+        |_| {},
     )
     .unwrap();
 
-    let pipeline = GraphicsPipeline::start()
-        .render_pass(Subpass::from(render_pass.clone(), 0).unwrap())
-        .vertex_input_state(BuffersDefinition::new().vertex::<Vertex>())
-        .input_assembly_state(InputAssemblyState::new())
-        .vertex_shader(vs.entry_point("main").unwrap(), ())
-        .viewport_state(ViewportState::viewport_dynamic_scissor_irrelevant())
-        .fragment_shader(fs.entry_point("main").unwrap(), ())
-        .build(device.clone())
-        .unwrap();
-
-    let mut viewport = Viewport {
-        origin: [0.0, 0.0],
-        dimensions: [0.0, 0.0],
-        depth_range: 0.0..1.0,
-    };
-
-    let mut framebuffers = window_size_dependent_setup(&images, render_pass.clone(), &mut viewport);
+    let img_dims = images[0].dimensions().width_height();
 
     let mut recreate_swapchain = false;
-
     let mut previous_frame_end = Some(sync::now(device.clone()).boxed());
 
     event_loop.run(move |event, _, control_flow| match event {
@@ -237,8 +250,6 @@ fn main() {
                 };
 
                 swapchain = new_swapchain;
-                framebuffers =
-                    window_size_dependent_setup(&new_images, render_pass.clone(), &mut viewport);
                 recreate_swapchain = false;
             }
 
@@ -268,22 +279,18 @@ fn main() {
                 CommandBufferUsage::OneTimeSubmit,
             )
             .unwrap();
-
+            let pipeline_layout = compute_pipeline.layout();
+            let desc_layout = pipeline_layout.set_layouts().get(0).unwrap();
+            let set = PersistentDescriptorSet::new(
+                desc_layout.clone(),
+                [WriteDescriptorSet::image_view(
+                    0,
+                    compute_runner.storage_image(),
+                )],
+            );
             builder
-                .begin_render_pass(
-                    RenderPassBeginInfo {
-                        clear_values: vec![Some([0.0, 0.0, 1.0, 1.0].into())],
-                        ..RenderPassBeginInfo::framebuffer(framebuffers[image_num].clone())
-                    },
-                    SubpassContents::Inline,
-                )
-                .unwrap()
-                .set_viewport(0, [viewport.clone()])
-                .bind_pipeline_graphics(pipeline.clone())
-                .bind_vertex_buffers(0, vertex_buffer.clone())
-                .draw(vertex_buffer.len() as u32, 1, 0, 0)
-                .unwrap()
-                .end_render_pass()
+                .bind_pipeline_compute(compute_pipeline.clone())
+                .dispatch([img_dims[0], img_dims[1], 1])
                 .unwrap();
 
             let command_buffer = builder.build().unwrap();
@@ -313,29 +320,4 @@ fn main() {
         }
         _ => (),
     });
-}
-
-/// This method is called once during initialization, then again whenever the window is resized
-fn window_size_dependent_setup(
-    images: &[Arc<SwapchainImage<Window>>],
-    render_pass: Arc<RenderPass>,
-    viewport: &mut Viewport,
-) -> Vec<Arc<Framebuffer>> {
-    let dimensions = images[0].dimensions().width_height();
-    viewport.dimensions = [dimensions[0] as f32, dimensions[1] as f32];
-
-    images
-        .iter()
-        .map(|image| {
-            let view = ImageView::new_default(image.clone()).unwrap();
-            Framebuffer::new(
-                render_pass.clone(),
-                FramebufferCreateInfo {
-                    attachments: vec![view],
-                    ..Default::default()
-                },
-            )
-            .unwrap()
-        })
-        .collect::<Vec<_>>()
 }
