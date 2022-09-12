@@ -3,7 +3,7 @@ use vulkano::{
         physical::{PhysicalDevice, PhysicalDeviceType},
         Device, DeviceCreateInfo, DeviceExtensions, QueueCreateInfo,
     },
-    image::{ImageAccess, ImageUsage},
+    image::{view::ImageView, ImageUsage, ImageViewAbstract},
     instance::{Instance, InstanceCreateInfo},
     render_pass::Subpass,
     swapchain::{
@@ -100,7 +100,7 @@ fn main() {
                 .0,
         );
 
-        Swapchain::new(
+        let (swapchain, images) = Swapchain::new(
             device.clone(),
             surface.clone(),
             SwapchainCreateInfo {
@@ -119,7 +119,12 @@ fn main() {
                 ..Default::default()
             },
         )
-        .unwrap()
+        .unwrap();
+        let images = images
+            .into_iter()
+            .map(|image| ImageView::new_default(image.clone()).unwrap())
+            .collect::<Vec<_>>();
+        (swapchain, images)
     };
 
     let render_pass = vulkano::single_pass_renderpass!(queue.device().clone(),
@@ -144,7 +149,7 @@ fn main() {
     let graphics_runner = graphics::Runner::new(queue.clone(), subpass);
 
     let mut recreate_swapchain = false;
-    let mut previous_frame_end = sync::now(device.clone()).boxed();
+    let mut previous_frame_end = Some(sync::now(device.clone()).boxed());
 
     event_loop.run(move |event, _, control_flow| match event {
         Event::WindowEvent {
@@ -163,7 +168,7 @@ fn main() {
                 return;
             }
 
-            previous_frame_end.as_mut().cleanup_finished();
+            previous_frame_end.as_mut().unwrap().cleanup_finished();
 
             if recreate_swapchain {
                 let (new_swapchain, new_images) = match swapchain.recreate(SwapchainCreateInfo {
@@ -195,25 +200,25 @@ fn main() {
                 recreate_swapchain = true;
             }
 
-            let compute_future = compute_runner.compute(previous_frame_end);
-            graphics_runner.draw(size, todo!());
+            let future = previous_frame_end.take().unwrap().join(acquire_future);
+            let compute_future = compute_runner.compute(future.boxed());
+            graphics_runner.draw(size, images[image_num].clone());
 
             let render_future = compute_future
-                .join(acquire_future)
                 .then_swapchain_present(queue.clone(), swapchain.clone(), image_num)
                 .then_signal_fence_and_flush();
 
             match render_future {
                 Ok(future) => {
-                    previous_frame_end = future.boxed();
+                    previous_frame_end = Some(future.boxed());
                 }
                 Err(FlushError::OutOfDate) => {
                     recreate_swapchain = true;
-                    previous_frame_end = sync::now(device.clone()).boxed();
+                    previous_frame_end = Some(sync::now(device.clone()).boxed());
                 }
                 Err(e) => {
                     println!("Failed to flush future: {:?}", e);
-                    previous_frame_end = sync::now(device.clone()).boxed();
+                    previous_frame_end = Some(sync::now(device.clone()).boxed());
                 }
             }
         }

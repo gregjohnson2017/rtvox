@@ -160,7 +160,7 @@ impl Runner {
     pub fn draw(
         &self,
         size: [u32; 2],
-        image: Arc<dyn ImageViewAbstract>,
+        image: Arc<dyn ImageViewAbstract + 'static>,
     ) -> SecondaryAutoCommandBuffer {
         let mut builder = AutoCommandBufferBuilder::secondary(
             self.queue.device().clone(),

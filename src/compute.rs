@@ -71,7 +71,10 @@ impl Runner {
         }
     }
 
-    pub fn compute(&self, before_future: Box<dyn GpuFuture>) -> Box<dyn GpuFuture> {
+    pub fn compute<F>(&self, before_future: F) -> Box<dyn GpuFuture>
+    where
+        F: GpuFuture + 'static,
+    {
         // Building a command buffer is an expensive operation (usually a few hundred
         // microseconds), but it is known to be a hot path in the driver and is expected to be
         // optimized.
