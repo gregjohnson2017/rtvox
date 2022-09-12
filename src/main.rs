@@ -1,16 +1,11 @@
-use std::sync::Arc;
-
 use vulkano::{
-    command_buffer::{AutoCommandBufferBuilder, CommandBufferUsage},
-    descriptor_set::{PersistentDescriptorSet, WriteDescriptorSet},
     device::{
         physical::{PhysicalDevice, PhysicalDeviceType},
-        Device, DeviceCreateInfo, DeviceExtensions, Queue, QueueCreateInfo,
+        Device, DeviceCreateInfo, DeviceExtensions, QueueCreateInfo,
     },
-    format::Format,
-    image::{view::ImageView, ImageAccess, ImageUsage, StorageImage},
+    image::{ImageAccess, ImageUsage},
     instance::{Instance, InstanceCreateInfo},
-    pipeline::{ComputePipeline, Pipeline},
+    render_pass::Subpass,
     swapchain::{
         acquire_next_image, AcquireError, Swapchain, SwapchainCreateInfo, SwapchainCreationError,
     },
@@ -23,33 +18,8 @@ use winit::{
     window::WindowBuilder,
 };
 
-struct ComputeRunner {
-    storage_image: Arc<ImageView<StorageImage>>,
-}
-
-impl ComputeRunner {
-    fn new(queue: Arc<Queue>, size: [u32; 2]) -> ComputeRunner {
-        let storage_image: Arc<ImageView<StorageImage>> = StorageImage::general_purpose_image_view(
-            queue.clone(),
-            size,
-            Format::R8G8B8A8_UNORM,
-            ImageUsage {
-                sampled: true,
-                transfer_dst: true,
-                storage: true,
-                color_attachment: true,
-                ..ImageUsage::none()
-            },
-        )
-        .unwrap();
-
-        ComputeRunner { storage_image }
-    }
-
-    fn storage_image(&self) -> Arc<ImageView<StorageImage>> {
-        self.storage_image.clone()
-    }
-}
+mod compute;
+mod graphics;
 
 fn main() {
     /*
@@ -152,92 +122,48 @@ fn main() {
         .unwrap()
     };
 
-    let compute_runner = ComputeRunner::new(queue.clone(), images[0].dimensions().width_height());
-
-    mod vs {
-        vulkano_shaders::shader! {
-            ty: "vertex",
-            src: "
-                #version 450
-
-                layout(location=0) in vec2 position;
-                layout(location=1) in vec2 tex_coords;
-                layout(location = 0) out vec2 f_tex_coords;
-
-                void main() {
-                    gl_Position =  vec4(position, 0.0, 1.0);
-                    f_tex_coords = tex_coords;
-                }
-            "
+    let render_pass = vulkano::single_pass_renderpass!(queue.device().clone(),
+        attachments: {
+            color: {
+                load: Clear,
+                store: Store,
+                format: swapchain.image_format(),
+                samples: 1,
+            }
+        },
+        pass: {
+                color: [color],
+                depth_stencil: {}
         }
-    }
-
-    mod fs {
-        vulkano_shaders::shader! {
-            ty: "fragment",
-            src: "
-                #version 450
-
-                layout(location = 0) in vec2 v_tex_coords;
-                layout(location = 0) out vec4 f_color;
-                layout(set = 0, binding = 0) uniform sampler2D tex;
-
-                void main() {
-                    f_color = texture(tex, v_tex_coords);
-                }
-            "
-        }
-    }
-
-    mod cs {
-        vulkano_shaders::shader! {
-            ty: "compute",
-            src: "
-                #version 450
-
-                layout(set = 0, binding = 0, rgba8) uniform writeonly image2D img;
-
-                void main() {
-                    imageStore(img, ivec2(gl_GlobalInvocationID.xy), vec4(255, 255, 255, 0));
-                }
-            "
-        }
-    }
-
-    let vs = vs::load(device.clone()).unwrap();
-    let fs = fs::load(device.clone()).unwrap();
-    let cs = cs::load(device.clone()).unwrap();
-
-    let compute_pipeline = ComputePipeline::new(
-        device.clone(),
-        cs.entry_point("main").unwrap(),
-        &(),
-        None,
-        |_| {},
     )
     .unwrap();
+    let subpass = Subpass::from(render_pass.clone(), 0).unwrap();
 
-    let img_dims = images[0].dimensions().width_height();
+    let size = images[0].dimensions().width_height();
+    let compute_runner = compute::Runner::new(queue.clone(), size);
+    let graphics_runner = graphics::Runner::new(queue.clone(), subpass);
 
     let mut recreate_swapchain = false;
-    let mut previous_frame_end = Some(sync::now(device.clone()).boxed());
+    let mut previous_frame_end = sync::now(device.clone()).boxed();
 
     event_loop.run(move |event, _, control_flow| match event {
         Event::WindowEvent {
             event: WindowEvent::CloseRequested,
             ..
         } => *control_flow = ControlFlow::Exit,
+
         Event::WindowEvent {
             event: WindowEvent::Resized(_),
             ..
         } => recreate_swapchain = true,
+
         Event::RedrawEventsCleared => {
             let dimensions = surface.window().inner_size();
             if dimensions.width == 0 || dimensions.height == 0 {
                 return;
             }
 
-            previous_frame_end.as_mut().unwrap().cleanup_finished();
+            previous_frame_end.as_mut().cleanup_finished();
 
             if recreate_swapchain {
                 let (new_swapchain, new_images) = match swapchain.recreate(SwapchainCreateInfo {
@@ -269,52 +195,25 @@ fn main() {
                 recreate_swapchain = true;
             }
 
-            // Building a command buffer is an expensive operation (usually a few hundred
-            // microseconds), but it is known to be a hot path in the driver and is expected to be
-            // optimized.
-            // TODO Could this be made outside the loop? Does it matter?
-            let mut builder = AutoCommandBufferBuilder::primary(
-                device.clone(),
-                queue.family(),
-                CommandBufferUsage::OneTimeSubmit,
-            )
-            .unwrap();
-            let pipeline_layout = compute_pipeline.layout();
-            let desc_layout = pipeline_layout.set_layouts().get(0).unwrap();
-            let set = PersistentDescriptorSet::new(
-                desc_layout.clone(),
-                [WriteDescriptorSet::image_view(
-                    0,
-                    compute_runner.storage_image(),
-                )],
-            );
-            builder
-                .bind_pipeline_compute(compute_pipeline.clone())
-                .dispatch([img_dims[0], img_dims[1], 1])
-                .unwrap();
+            let compute_future = compute_runner.compute(previous_frame_end);
+            graphics_runner.draw(size, todo!());
 
-            let command_buffer = builder.build().unwrap();
-
-            let future = previous_frame_end
-                .take()
-                .unwrap()
+            let render_future = compute_future
                 .join(acquire_future)
-                .then_execute(queue.clone(), command_buffer)
-                .unwrap()
                 .then_swapchain_present(queue.clone(), swapchain.clone(), image_num)
                 .then_signal_fence_and_flush();
 
-            match future {
+            match render_future {
                 Ok(future) => {
-                    previous_frame_end = Some(future.boxed());
+                    previous_frame_end = future.boxed();
                 }
                 Err(FlushError::OutOfDate) => {
                     recreate_swapchain = true;
-                    previous_frame_end = Some(sync::now(device.clone()).boxed());
+                    previous_frame_end = sync::now(device.clone()).boxed();
                 }
                 Err(e) => {
                     println!("Failed to flush future: {:?}", e);
-                    previous_frame_end = Some(sync::now(device.clone()).boxed());
+                    previous_frame_end = sync::now(device.clone()).boxed();
                 }
             }
         }
