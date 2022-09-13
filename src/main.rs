@@ -143,7 +143,7 @@ fn main() {
         (swapchain, images)
     };
 
-    let size = images[0].dimensions().width_height();
+    let mut size = images[0].dimensions().width_height();
 
     mod cs {
         vulkano_shaders::shader! {
@@ -221,6 +221,7 @@ fn main() {
                     .collect::<Vec<_>>();
                 swapchain = new_swapchain;
                 recreate_swapchain = false;
+                size = images[0].dimensions().width_height();
             }
 
             // This function can block if no image is available. The parameter is an optional timeout
