@@ -1,15 +1,14 @@
 use vulkano::{
-    command_buffer::{AutoCommandBufferBuilder, CommandBufferUsage},
+    command_buffer::{
+        AutoCommandBufferBuilder, BlitImageInfo, ClearColorImageInfo, CommandBufferUsage,
+    },
     descriptor_set::{PersistentDescriptorSet, WriteDescriptorSet},
     device::{
         physical::{PhysicalDevice, PhysicalDeviceType},
         Device, DeviceCreateInfo, DeviceExtensions, QueueCreateInfo,
     },
     format::Format,
-    image::{
-        view::{ImageView, ImageViewCreateInfo},
-        ImageUsage, ImageViewAbstract,
-    },
+    image::{view::ImageView, ImageAccess, ImageDimensions, ImageLayout, ImageUsage, StorageImage},
     instance::{Instance, InstanceCreateInfo},
     pipeline::{ComputePipeline, Pipeline, PipelineBindPoint},
     swapchain::{
@@ -95,10 +94,7 @@ fn main() {
     let image_format = Some(
         physical_device
             .surface_formats(&surface, SurfaceInfo::default())
-            .unwrap()
-            .into_iter()
-            .find(|(format, _)| *format == Format::R8G8B8A8_UNORM)
-            .unwrap()
+            .unwrap()[0]
             .0,
     );
 
@@ -115,7 +111,7 @@ fn main() {
                 image_format,
                 image_extent: surface.window().inner_size().into(),
                 image_usage: ImageUsage {
-                    storage: true,
+                    transfer_dst: true,
                     ..ImageUsage::color_attachment()
                 },
                 composite_alpha: surface_capabilities
@@ -127,23 +123,22 @@ fn main() {
             },
         )
         .unwrap();
-        let images = images
-            .into_iter()
-            .map(|image| {
-                ImageView::new(
-                    image.clone(),
-                    ImageViewCreateInfo {
-                        format: image_format,
-                        ..ImageViewCreateInfo::from_image(&image.clone())
-                    },
-                )
-                .unwrap()
-            })
-            .collect::<Vec<_>>();
         (swapchain, images)
     };
 
     let mut size = images[0].dimensions().width_height();
+
+    let storage_image = StorageImage::new(
+        device.clone(),
+        ImageDimensions::Dim2d {
+            width: size[0],
+            height: size[1],
+            array_layers: 1,
+        },
+        Format::R8G8B8A8_UNORM,
+        [queue.family()],
+    )
+    .unwrap();
 
     mod cs {
         vulkano_shaders::shader! {
@@ -199,26 +194,13 @@ fn main() {
             if recreate_swapchain {
                 let (new_swapchain, new_images) = match swapchain.recreate(SwapchainCreateInfo {
                     image_extent: dimensions.into(),
-                    image_format,
                     ..swapchain.create_info()
                 }) {
                     Ok(r) => r,
                     Err(SwapchainCreationError::ImageExtentNotSupported { .. }) => return,
                     Err(e) => panic!("Failed to recreate swapchain: {:?}", e),
                 };
-                images = new_images
-                    .into_iter()
-                    .map(|image| {
-                        ImageView::new(
-                            image.clone(),
-                            ImageViewCreateInfo {
-                                format: image_format,
-                                ..ImageViewCreateInfo::from_image(&image.clone())
-                            },
-                        )
-                        .unwrap()
-                    })
-                    .collect::<Vec<_>>();
+                images = new_images;
                 swapchain = new_swapchain;
                 recreate_swapchain = false;
                 size = images[0].dimensions().width_height();
@@ -251,21 +233,32 @@ fn main() {
             .unwrap();
             let pipeline_layout = compute_pipeline.layout();
             let desc_layout = pipeline_layout.set_layouts().get(0).unwrap();
-            let compute_set = PersistentDescriptorSet::new(
+            let compute_desc_set = PersistentDescriptorSet::new(
                 desc_layout.clone(),
-                [WriteDescriptorSet::image_view(0, images[image_num].clone())],
+                [WriteDescriptorSet::image_view(
+                    0,
+                    ImageView::new_default(storage_image.clone()).unwrap(),
+                )],
             )
             .unwrap();
 
             builder
+                .clear_color_image(ClearColorImageInfo::image(storage_image.clone()))
+                .unwrap()
                 .bind_pipeline_compute(compute_pipeline.clone())
                 .bind_descriptor_sets(
                     PipelineBindPoint::Compute,
                     compute_pipeline.layout().clone(),
                     0,
-                    compute_set,
+                    compute_desc_set,
                 )
                 .dispatch([size[0], size[1], 1])
+                .unwrap()
+                .blit_image(BlitImageInfo {
+                    src_image_layout: ImageLayout::General,
+                    dst_image_layout: ImageLayout::General,
+                    ..BlitImageInfo::images(storage_image.clone(), images[image_num].clone())
+                })
                 .unwrap();
 
             let command_buffer = builder.build().unwrap();
