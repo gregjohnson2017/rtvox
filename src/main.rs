@@ -145,14 +145,18 @@ fn main() {
             ty: "compute",
             src: "
                     #version 450
-    
+
+                    layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
                     layout(set = 0, binding = 0, rgba8) uniform writeonly image2D img;
-    
+
                     void main() {
+                        float x = float(gl_GlobalInvocationID.x);
+                        float y = float(gl_GlobalInvocationID.y);
+
                         ivec2 dims = imageSize(img);
-                        float r = 1.0 * float(gl_GlobalInvocationID.x) / float(dims.x);
-                        float g = 1.0 * float(gl_GlobalInvocationID.y) / float(dims.y);
-                        imageStore(img, ivec2(gl_GlobalInvocationID.xy), vec4(r, g, 0, 0));
+                        float r = 1.0 * x / float(dims.x);
+                        float g = 1.0 * y / float(dims.y);
+                        imageStore(img, ivec2(x, y), vec4(r, g, 0, 0));
                     }
                 "
         }
@@ -252,7 +256,7 @@ fn main() {
                     0,
                     compute_desc_set,
                 )
-                .dispatch([size[0], size[1], 1])
+                .dispatch([size[0] / 8, size[1] / 8, 1])
                 .unwrap()
                 .blit_image(BlitImageInfo {
                     src_image_layout: ImageLayout::General,
