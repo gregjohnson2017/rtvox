@@ -19,10 +19,13 @@ use vulkano::{
 };
 use vulkano_win::VkSurfaceBuild;
 use winit::{
+    dpi::PhysicalSize,
     event::{Event, WindowEvent},
     event_loop::{ControlFlow, EventLoop},
     window::WindowBuilder,
 };
+
+const COMPUTE_GROUP_SIZE: u32 = 8;
 
 fn main() {
     /*
@@ -48,6 +51,10 @@ fn main() {
     .unwrap();
     let event_loop = EventLoop::new();
     let surface = WindowBuilder::new()
+        .with_min_inner_size(PhysicalSize {
+            width: COMPUTE_GROUP_SIZE,
+            height: COMPUTE_GROUP_SIZE,
+        })
         .build_vk_surface(&event_loop, instance.clone())
         .unwrap();
     let device_extensions = DeviceExtensions {
@@ -128,7 +135,7 @@ fn main() {
 
     let mut size = images[0].dimensions().width_height();
 
-    let storage_image = StorageImage::new(
+    let mut storage_image = StorageImage::new(
         device.clone(),
         ImageDimensions::Dim2d {
             width: size[0],
@@ -146,19 +153,70 @@ fn main() {
             src: "
                     #version 450
 
+                    //layout(set = 0, binding = 0) uniform Data {
+                    //    vec3 eye;
+                    //    vec3 target;
+                    //    float fov;
+                    //} uniforms;
+
                     layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
                     layout(set = 0, binding = 0, rgba8) uniform writeonly image2D img;
+
+                    #define M_PI 3.1415926535897932384626433832795
+
+                    vec3 calculate_ray() {
+                        float x = float(gl_GlobalInvocationID.x);
+                        float y = float(gl_GlobalInvocationID.y);
+                        float k = float(gl_NumWorkGroups.x * gl_WorkGroupSize.x);
+                        float m = float(gl_NumWorkGroups.y * gl_WorkGroupSize.y);
+                        vec3 E = vec3(0.0, 0.0, 0.0);
+                        vec3 T = vec3(0.0, 0.0, 5.0);
+                        vec3 v = vec3(0.0, 1.0, 0.0);
+                        float theta = M_PI / 2.0;;
+
+                        vec3 t = T - E;
+                        vec3 t_n = normalize(t);
+                        vec3 b = cross(t, v);
+                        vec3 b_n = normalize(b);
+                        vec3 v_n = cross(t_n, b_n);
+
+                        float g_x = tan(theta / 2.0);
+                        float g_y = g_x * (m - 1.0) / (k - 1.0);
+
+                        vec3 q_x = 2.0 * g_x * b_n / (k - 1.0);
+                        vec3 q_y = 2.0 * g_y * v_n / (m - 1.0);
+                        vec3 p_1m = t_n - g_x * b_n - g_y * v_n;
+
+                        vec3 p_ij = p_1m + q_x * (x - 1.0) + q_y * (y - 1.0);
+                        vec3 ray = normalize(p_ij);
+
+                        return ray;
+                    }
+
+                    bool calculate_sphere_intersect(vec3 ray) {
+                        vec3 o = vec3(0.0, 0.0, 0.0);
+                        vec3 c = vec3(0.0, 0.0, 5.0);
+                        float r = 1.0;
+
+                        float d = pow(dot(ray, (o - c)), 2.0) - pow(length(o - c), 2.0) + pow(r, 2.0);
+
+                        return d > 0;
+                    }
 
                     void main() {
                         float x = float(gl_GlobalInvocationID.x);
                         float y = float(gl_GlobalInvocationID.y);
 
-                        ivec2 dims = imageSize(img);
-                        float r = 1.0 * x / float(dims.x);
-                        float g = 1.0 * y / float(dims.y);
-                        imageStore(img, ivec2(x, y), vec4(r, g, 0, 0));
+                        vec3 ray = calculate_ray();
+                        bool hit = calculate_sphere_intersect(ray);
+
+                        if (hit) {
+                            imageStore(img, ivec2(x, y), vec4(1.0, 1.0, 1.0, 0));
+                        } else {
+                            imageStore(img, ivec2(x, y), vec4(0.0, 0.0, 0.0, 0));
+                        }
                     }
-                "
+                ",
         }
     }
 
@@ -208,6 +266,17 @@ fn main() {
                 swapchain = new_swapchain;
                 recreate_swapchain = false;
                 size = images[0].dimensions().width_height();
+                storage_image = StorageImage::new(
+                    device.clone(),
+                    ImageDimensions::Dim2d {
+                        width: size[0],
+                        height: size[1],
+                        array_layers: 1,
+                    },
+                    Format::R8G8B8A8_UNORM,
+                    [queue.family()],
+                )
+                .unwrap();
             }
 
             // This function can block if no image is available. The parameter is an optional timeout
@@ -256,7 +325,11 @@ fn main() {
                     0,
                     compute_desc_set,
                 )
-                .dispatch([size[0] / 8, size[1] / 8, 1])
+                .dispatch([
+                    size[0] / COMPUTE_GROUP_SIZE,
+                    size[1] / COMPUTE_GROUP_SIZE,
+                    1,
+                ])
                 .unwrap()
                 .blit_image(BlitImageInfo {
                     src_image_layout: ImageLayout::General,
