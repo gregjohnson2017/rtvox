@@ -1,0 +1,11 @@
+{
+    "[rust]": {
+        "editor.formatOnSave": true,
+        "editor.codeActionsOnSave": {
+            "source.organizeImports": true
+        }
+    },
+    "[glsl]": {
+        "files.trimTrailingWhitespace": true
+    }
+}
