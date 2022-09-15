@@ -1,4 +1,6 @@
+use std::f32::consts::PI;
 use vulkano::{
+    buffer::{BufferUsage, CpuAccessibleBuffer},
     command_buffer::{
         AutoCommandBufferBuilder, BlitImageInfo, ClearColorImageInfo, CommandBufferUsage,
     },
@@ -153,15 +155,17 @@ fn main() {
             src: "
                     #version 450
 
-                    //layout(set = 0, binding = 0) uniform Data {
-                    //    vec3 eye;
-                    //    vec3 target;
-                    //    float fov;
-                    //} uniforms;
-
+                    
                     layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
+
                     layout(set = 0, binding = 0, rgba8) uniform writeonly image2D img;
 
+                    layout(set = 0, binding = 1) uniform CameraInfo {
+                        vec3 target;
+                        float fov;
+                        vec3 eye;
+                    } uniforms;
+                    
                     #define M_PI 3.1415926535897932384626433832795
 
                     vec3 calculate_ray() {
@@ -217,9 +221,29 @@ fn main() {
                         }
                     }
                 ",
+                types_meta: {
+                    use bytemuck::{Pod, Zeroable};
+                    #[derive(Clone, Copy, PartialEq, Debug, Default, Zeroable, Pod)]
+                    impl Eq
+                }
         }
     }
 
+    let camera_info = CpuAccessibleBuffer::from_data(
+        device.clone(),
+        // BufferUsage {
+        //     uniform_buffer: true,
+        //     ..BufferUsage::none()
+        // },
+        BufferUsage::all(),
+        false,
+        cs::ty::CameraInfo {
+            target: [0.0, 0.0, 5.0],
+            fov: PI / 2.0,
+            eye: [0.0, 0.0, 0.0],
+        },
+    )
+    .unwrap();
     let cs = cs::load(device.clone()).unwrap();
 
     let compute_pipeline = ComputePipeline::new(
@@ -308,10 +332,13 @@ fn main() {
             let desc_layout = pipeline_layout.set_layouts().get(0).unwrap();
             let compute_desc_set = PersistentDescriptorSet::new(
                 desc_layout.clone(),
-                [WriteDescriptorSet::image_view(
-                    0,
-                    ImageView::new_default(storage_image.clone()).unwrap(),
-                )],
+                [
+                    WriteDescriptorSet::image_view(
+                        0,
+                        ImageView::new_default(storage_image.clone()).unwrap(),
+                    ),
+                    WriteDescriptorSet::buffer(1, camera_info.clone()),
+                ],
             )
             .unwrap();
 
