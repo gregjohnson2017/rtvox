@@ -173,10 +173,10 @@ fn main() {
                         float y = float(gl_GlobalInvocationID.y);
                         float k = float(gl_NumWorkGroups.x * gl_WorkGroupSize.x);
                         float m = float(gl_NumWorkGroups.y * gl_WorkGroupSize.y);
-                        vec3 E = vec3(0.0, 0.0, 0.0);
-                        vec3 T = vec3(0.0, 0.0, 5.0);
+                        vec3 E = uniforms.eye;
+                        vec3 T = uniforms.target;
                         vec3 v = vec3(0.0, 1.0, 0.0);
-                        float theta = M_PI / 2.0;;
+                        float theta = uniforms.fov;
 
                         vec3 t = T - E;
                         vec3 t_n = normalize(t);
@@ -198,8 +198,8 @@ fn main() {
                     }
 
                     bool calculate_sphere_intersect(vec3 ray) {
-                        vec3 o = vec3(0.0, 0.0, 0.0);
-                        vec3 c = vec3(0.0, 0.0, 5.0);
+                        vec3 o = uniforms.eye;
+                        vec3 c = uniforms.target;
                         float r = 1.0;
 
                         float d = pow(dot(ray, (o - c)), 2.0) - pow(length(o - c), 2.0) + pow(r, 2.0);
