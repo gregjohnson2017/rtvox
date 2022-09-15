@@ -105,7 +105,7 @@ fn main() {
             .0,
     );
 
-    let (mut swapchain, mut images) = {
+    let (mut swapchain, mut swapchain_images) = {
         let surface_capabilities = physical_device
             .surface_capabilities(&surface, SurfaceInfo::default())
             .unwrap();
@@ -133,7 +133,7 @@ fn main() {
         (swapchain, images)
     };
 
-    let mut size = images[0].dimensions().width_height();
+    let mut size = swapchain_images[0].dimensions().width_height();
 
     let mut storage_image = StorageImage::new(
         device.clone(),
@@ -262,10 +262,10 @@ fn main() {
                     Err(SwapchainCreationError::ImageExtentNotSupported { .. }) => return,
                     Err(e) => panic!("Failed to recreate swapchain: {:?}", e),
                 };
-                images = new_images;
+                swapchain_images = new_images;
                 swapchain = new_swapchain;
                 recreate_swapchain = false;
-                size = images[0].dimensions().width_height();
+                size = swapchain_images[0].dimensions().width_height();
                 storage_image = StorageImage::new(
                     device.clone(),
                     ImageDimensions::Dim2d {
@@ -281,7 +281,7 @@ fn main() {
 
             // This function can block if no image is available. The parameter is an optional timeout
             // after which the function call will return an error.
-            let (image_num, suboptimal, acquire_future) =
+            let (next_image_idx, suboptimal, acquire_future) =
                 match acquire_next_image(swapchain.clone(), None) {
                     Ok(r) => r,
                     Err(AcquireError::OutOfDate) => {
@@ -334,7 +334,10 @@ fn main() {
                 .blit_image(BlitImageInfo {
                     src_image_layout: ImageLayout::General,
                     dst_image_layout: ImageLayout::General,
-                    ..BlitImageInfo::images(storage_image.clone(), images[image_num].clone())
+                    ..BlitImageInfo::images(
+                        storage_image.clone(),
+                        swapchain_images[next_image_idx].clone(),
+                    )
                 })
                 .unwrap();
 
@@ -343,7 +346,7 @@ fn main() {
             let render_future = future
                 .then_execute(queue.clone(), command_buffer)
                 .unwrap()
-                .then_swapchain_present(queue.clone(), swapchain.clone(), image_num)
+                .then_swapchain_present(queue.clone(), swapchain.clone(), next_image_idx)
                 .then_signal_fence_and_flush();
 
             match render_future {
