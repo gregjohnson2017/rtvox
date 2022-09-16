@@ -1,4 +1,4 @@
-use std::{f32::consts::PI, sync::Arc};
+use std::sync::Arc;
 use vulkano::{
     buffer::{BufferUsage, CpuAccessibleBuffer},
     command_buffer::{
@@ -25,6 +25,8 @@ use vulkano::{
 
 use winit::window::Window;
 
+use self::cs::ty::CameraInfo;
+
 pub const COMPUTE_GROUP_SIZE: u32 = 8;
 pub struct Graphics {
     surface: Arc<Surface<Window>>,
@@ -38,7 +40,7 @@ pub struct Graphics {
     camera_info: Arc<CpuAccessibleBuffer<cs::ty::CameraInfo>>,
 }
 impl Graphics {
-    pub fn new(surface: Arc<Surface<Window>>) -> Self {
+    pub fn new(surface: Arc<Surface<Window>>, camera_info: CameraInfo) -> Self {
         let device_extensions = DeviceExtensions {
             khr_swapchain: true,
             ..DeviceExtensions::none()
@@ -129,20 +131,6 @@ impl Graphics {
         )
         .unwrap();
 
-        let camera_info = CpuAccessibleBuffer::from_data(
-            device.clone(),
-            BufferUsage {
-                uniform_buffer: true,
-                ..BufferUsage::none()
-            },
-            false,
-            cs::ty::CameraInfo {
-                target: [0.0, 0.0, 5.0],
-                fov: PI / 2.0,
-                eye: [0.0, 0.0, 0.0],
-            },
-        )
-        .unwrap();
         let cs = cs::load(device.clone()).unwrap();
 
         let compute_pipeline = ComputePipeline::new(
@@ -163,7 +151,7 @@ impl Graphics {
             storage_image,
             queue,
             compute_pipeline,
-            camera_info,
+            camera_info: Self::create_camera_info_buffer(device, camera_info),
         }
     }
 
@@ -289,15 +277,35 @@ impl Graphics {
             }
         }
     }
+
+    fn create_camera_info_buffer(
+        device: Arc<Device>,
+        camera_info: CameraInfo,
+    ) -> Arc<CpuAccessibleBuffer<CameraInfo>> {
+        CpuAccessibleBuffer::from_data(
+            device.clone(),
+            BufferUsage {
+                uniform_buffer: true,
+                ..BufferUsage::none()
+            },
+            false,
+            camera_info,
+        )
+        .unwrap()
+    }
+
+    pub fn update_camera(&mut self, camera_info: CameraInfo) {
+        self.camera_info = Self::create_camera_info_buffer(self.queue.device().clone(), camera_info)
+    }
 }
 
-mod cs {
+pub mod cs {
     vulkano_shaders::shader! {
         ty: "compute",
         path: "src/graphics.comp",
         types_meta: {
             use bytemuck::{Pod, Zeroable};
-            #[derive(Clone, Copy, Zeroable, Pod)]
+            #[derive(Clone, Debug, Copy, Zeroable, Pod)]
         }
     }
 }
