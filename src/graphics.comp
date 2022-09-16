@@ -39,15 +39,103 @@ vec3 calculate_ray() {
     return ray;
 }
 
-bool calculate_sphere_intersect(vec3 ray) {
-    vec3 o = uniforms.eye;
-    vec3 c = vec3(0.0, 0.0, -5.0);
-    float r = 1.0;
+#define NUMDIM 3
+#define YZ 0
+#define XZ 1
+#define XY 2
 
-    float delta = pow(dot(ray, (o - c)), 2.0) - pow(length(o - c), 2.0) + pow(r, 2.0);
-    float d = -1.0 * dot(ray, (o - c)) + sqrt(delta);
+vec3 hit_aabb(vec3 ray) {
+    vec3 miss_col = vec3(0.0, 0.0, 0.0);
+    vec3 minB = vec3(-0.5, -0.5, -5.5);
+    vec3 maxB = vec3(0.5, 0.5, -4.5);
+    vec3 origin = uniforms.eye;
+    vec3 dir = ray;
+    vec3 coord = vec3(0.0, 0.0, 0.0);
 
-    return d > 0;
+	bool inside = true;
+	ivec3 quadrant = ivec3(0, 0, 0);
+	int whichPlane = 0;
+	vec3 maxT = vec3(0.0, 0.0, 0.0);
+    vec3 candidatePlane = vec3(0.0, 0.0, 0.0);
+
+	/* Find candidate planes; this loop can be avoided if
+   	rays cast all from the eye(assume perpsective view) */
+	for (int i = 0; i < NUMDIM; i++) {
+		if (origin[i] < minB[i]) {
+			quadrant[i] = XZ;
+			candidatePlane[i] = minB[i];
+			inside = false;
+		} else if (origin[i] > maxB[i]) {
+			quadrant[i] = YZ;
+			candidatePlane[i] = maxB[i];
+			inside = false;
+		} else {
+			quadrant[i] = XY;
+		}
+    }
+	/* Ray origin inside bounding box */
+	if (inside)	{
+		coord = origin;
+		return vec3(1.0, 1.0, 1.0);
+	}
+	/* Calculate T distances to candidate planes */
+	for (int i = 0; i < NUMDIM; i++) {
+		if (quadrant[i] != XY && dir[i] != 0.) {
+			maxT[i] = (candidatePlane[i] - origin[i]) / dir[i];
+        } else {
+			maxT[i] = -1.;
+        }
+    }
+	/* Get largest of the maxT's for final choice of intersection */
+	for (int i = 1; i < NUMDIM; i++) {
+		if (maxT[whichPlane] < maxT[i]) {
+			whichPlane = i;
+        }
+    }
+	/* Check final candidate actually inside box */
+	if (maxT[whichPlane] < 0.) {
+        return miss_col;
+    }
+	for (int i = 0; i < NUMDIM; i++) {
+		if (whichPlane != i) {
+			coord[i] = origin[i] + maxT[whichPlane] *dir[i];
+			if (coord[i] < minB[i] || coord[i] > maxB[i]) {
+				return miss_col;
+            }
+		} else {
+			coord[i] = candidatePlane[i];
+		}
+    }
+
+    // demonstration of hit coord
+    if (coord[0] > 0 && coord[1] > 0 && coord[2] > -5) {
+        return vec3(0.2, 0.2, 0.2);
+    }
+    if (whichPlane == XZ) {
+        if (coord[1] > minB.y) {
+            // top
+            return vec3(1.0, 0.0, 0.0);
+        } else {
+            // bottom
+            return vec3(1.0, 1.0, 0.0);
+        }
+    } else if (whichPlane == YZ) {
+        if (coord[0] > minB.x) {
+            // right
+            return vec3(0.0, 1.0, 1.0);
+        } else {
+            // left
+            return vec3(0.0, 1.0, 0.0);
+        }
+    } else {
+        if (coord[2] > minB.z) {
+            // back
+            return vec3(1.0, 0.0, 1.0);
+        } else {
+            // front
+            return vec3(0.0, 0.0, 1.0);
+        }
+    }
 }
 
 void main() {
@@ -55,11 +143,6 @@ void main() {
     float y = float(gl_GlobalInvocationID.y);
 
     vec3 ray = calculate_ray();
-    bool hit = calculate_sphere_intersect(ray);
-
-    if (hit) {
-        imageStore(img, ivec2(x, y), vec4(1.0, 1.0, 1.0, 0));
-    } else {
-        imageStore(img, ivec2(x, y), vec4(0.0, 0.0, 0.0, 0));
-    }
+    vec3 col = hit_aabb(ray);
+    imageStore(img, ivec2(x, y), vec4(col, 0));
 }
