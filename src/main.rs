@@ -1,6 +1,6 @@
-use std::f32::consts::PI;
+use std::{f32::consts::PI, time::Instant};
 
-use camera::{Camera, LookEvent, BACKWARD, DOWN, FORWARD, LEFT, RIGHT, UP};
+use camera::{Camera, LookEvent, MoveDirection};
 use graphics::Graphics;
 use vulkano::instance::{Instance, InstanceCreateInfo};
 use vulkano_win::VkSurfaceBuild;
@@ -36,6 +36,7 @@ fn main() {
     let mut camera = Camera::new([0.0, 0.0, 0.0], PI / 2.0);
     let mut graphics = Graphics::new(surface, camera.get_camera_info());
     let mut mouse_1_held = false;
+    let mut started_moving: Option<Instant> = None;
     event_loop.run(move |event, _, control_flow| match event {
         Event::WindowEvent {
             event: WindowEvent::CloseRequested,
@@ -47,14 +48,24 @@ fn main() {
             ..
         } => graphics.recreate_swapchain = true,
 
-        Event::RedrawEventsCleared => graphics.redraw(),
+        Event::RedrawEventsCleared => {
+            match started_moving {
+                None => (),
+                Some(dur) => {
+                    camera.update_position(dur.elapsed());
+                    started_moving = Some(Instant::now());
+                }
+            }
+            graphics.update_camera(camera.get_camera_info());
+            graphics.redraw();
+        }
 
         Event::WindowEvent {
             event:
                 WindowEvent::KeyboardInput {
                     input:
                         KeyboardInput {
-                            state: ElementState::Pressed,
+                            state,
                             virtual_keycode: Some(key),
                             ..
                         },
@@ -63,24 +74,26 @@ fn main() {
             ..
         } => {
             let direction = match key {
-                VirtualKeyCode::W => Some(FORWARD),
-                VirtualKeyCode::A => Some(LEFT),
-                VirtualKeyCode::S => Some(BACKWARD),
-                VirtualKeyCode::D => Some(RIGHT),
-                VirtualKeyCode::LShift => Some(DOWN),
-                VirtualKeyCode::Space => Some(UP),
+                VirtualKeyCode::W => Some(MoveDirection::Forward),
+                VirtualKeyCode::A => Some(MoveDirection::Left),
+                VirtualKeyCode::S => Some(MoveDirection::Backward),
+                VirtualKeyCode::D => Some(MoveDirection::Right),
+                VirtualKeyCode::LShift => Some(MoveDirection::Down),
+                VirtualKeyCode::Space => Some(MoveDirection::Up),
                 _ => None,
             };
             match direction {
-                Some(dir) if dir == UP || dir == DOWN => {
-                    camera.move_absolute(dir);
-                    graphics.update_camera(camera.get_camera_info());
-                }
-                Some(dir) => {
-                    camera.move_relative(dir);
-                    graphics.update_camera(camera.get_camera_info());
-                }
                 None => (),
+                Some(direction) => match state {
+                    ElementState::Pressed => {
+                        started_moving = Some(Instant::now());
+                        camera.start_moving(direction);
+                    }
+                    ElementState::Released => {
+                        started_moving.map(|i| camera.stop_moving(i.elapsed()));
+                        started_moving.take();
+                    }
+                },
             }
         }
         Event::DeviceEvent {
@@ -93,7 +106,6 @@ fn main() {
                 down: dy as f32 / 500.0,
             };
             camera.apply_look_event(look_evt);
-            graphics.update_camera(camera.get_camera_info());
         }
         Event::WindowEvent {
             event:
