@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::{io::Cursor, sync::Arc};
 use vulkano::{
     buffer::{BufferUsage, CpuAccessibleBuffer},
     command_buffer::{
@@ -11,8 +11,9 @@ use vulkano::{
     },
     format::Format,
     image::{
-        view::ImageView, ImageAccess, ImageDimensions, ImageLayout, ImageUsage, StorageImage,
-        SwapchainImage,
+        view::{ImageView, ImageViewCreateInfo, ImageViewType},
+        ImageAccess, ImageDimensions, ImageLayout, ImageUsage, ImmutableImage, MipmapsCount,
+        StorageImage, SwapchainImage,
     },
     memory::pool::StdMemoryPool,
     pipeline::{ComputePipeline, Pipeline, PipelineBindPoint},
@@ -38,6 +39,7 @@ pub struct Graphics {
     queue: Arc<Queue>,
     compute_pipeline: Arc<ComputePipeline>,
     camera_info: Arc<CpuAccessibleBuffer<cs::ty::CameraInfo>>,
+    // cube_map_array: Arc<ImageView<ImmutableImage>>,
 }
 impl Graphics {
     pub fn new(surface: Arc<Surface<Window>>, camera_info: CameraInfo) -> Self {
@@ -142,9 +144,41 @@ impl Graphics {
         )
         .unwrap();
 
+        // let png_bytes = include_bytes!("sprite_sheet.png").to_vec();
+        // let cursor = Cursor::new(png_bytes.clone());
+        // let decoder = png::Decoder::new(cursor);
+        // let mut reader = decoder.read_info().unwrap();
+        // let info = reader.info();
+        // let dimensions = ImageDimensions::Dim2d {
+        //     width: info.width,
+        //     height: info.height,
+        //     array_layers: (36 * info.height) / info.width,
+        // }; // Replace with your actual image array dimensions
+        // let mut image_data = Vec::new();
+        // image_data.resize((info.width * info.height * 4) as usize, 0);
+        // reader.next_frame(&mut image_data).unwrap();
+        // let (tex_image, tex_future) = ImmutableImage::from_iter(
+        //     png_bytes.clone(),
+        //     dimensions,
+        //     MipmapsCount::Log2,
+        //     Format::R8G8B8A8_SRGB,
+        //     queue.clone(),
+        // )
+        // .unwrap();
+        // // TODO need sampler?
+        // let cube_map_array = ImageView::new(
+        //     tex_image.clone(),
+        //     ImageViewCreateInfo {
+        //         view_type: ImageViewType::CubeArray,
+        //         ..ImageViewCreateInfo::from_image(tex_image.clone().as_ref())
+        //     },
+        // )
+        // .unwrap();
+
         Self {
             surface,
             recreate_swapchain: false,
+            // previous_frame_end: Some(tex_future.boxed()),
             previous_frame_end: Some(sync::now(device.clone()).boxed()),
             swapchain,
             swapchain_images,
@@ -152,6 +186,7 @@ impl Graphics {
             queue,
             compute_pipeline,
             camera_info: Self::create_camera_info_buffer(device, camera_info),
+            // cube_map_array,
         }
     }
 
@@ -225,6 +260,7 @@ impl Graphics {
                     ImageView::new_default(self.storage_image.clone()).unwrap(),
                 ),
                 WriteDescriptorSet::buffer(1, self.camera_info.clone()),
+                // WriteDescriptorSet::image_view(2, self.cube_map_array.clone()),
             ],
         )
         .unwrap();
