@@ -78,13 +78,21 @@ fn main() {
                     VirtualKeyCode::W => {
                         pressed_event!(MoveZ, Forward, Backward, camera.move_state.z)
                     }
-                    VirtualKeyCode::A => pressed_event!(MoveX, Left, Right, camera.move_state.x),
+                    VirtualKeyCode::A => {
+                        pressed_event!(MoveX, Left, Right, camera.move_state.x)
+                    }
                     VirtualKeyCode::S => {
                         pressed_event!(MoveZ, Backward, Forward, camera.move_state.z)
                     }
-                    VirtualKeyCode::D => pressed_event!(MoveX, Right, Left, camera.move_state.x),
-                    VirtualKeyCode::LShift => pressed_event!(MoveY, Down, Up, camera.move_state.y),
-                    VirtualKeyCode::Space => pressed_event!(MoveY, Up, Down, camera.move_state.y),
+                    VirtualKeyCode::D => {
+                        pressed_event!(MoveX, Right, Left, camera.move_state.x)
+                    }
+                    VirtualKeyCode::LShift => {
+                        pressed_event!(MoveY, Down, Up, camera.move_state.y)
+                    }
+                    VirtualKeyCode::Space => {
+                        pressed_event!(MoveY, Up, Down, camera.move_state.y)
+                    }
                     _ => (),
                 }
                 match started_moving {
@@ -149,50 +157,64 @@ fn main() {
 
 use paste::paste;
 
+/// Updates the movement direction based on a pressed key.
+///
+/// The first argument is the type of the direction enum, which must include the
+/// None value and *Override values for the passed in directions. The second
+/// argument is the direction of the key pressed. The third argument is the
+/// opposite direction of the key pressed. The fourth argument is the stored
+/// direction.
 #[macro_export]
 macro_rules! pressed_event {
-    ( $ty:ty, $v:ident, $av:ident, $store:expr ) => {
-        paste! {
-            pressed_event!(
-                $ty,
-                $v,
-                $av,
-                [< $v Override >],
-                [< $av Override >],
-                $store
-            )
-        }
+    ( $dir_enum:ty, $dir:ident, $anti_dir:ident, $store:expr ) => {
+        paste!(pressed_event! {
+            @expanded
+            $dir_enum,
+            $dir,
+            $anti_dir,
+            [< $dir Override >],
+            [< $anti_dir Override >],
+            $store
+        })
     };
 
-    ( $ty:ty, $v:ident, $av:ident, $vo:ident, $avo:ident, $store:expr ) => {
+    ( @expanded $dir_enum:ty, $dir:ident, $anti_dir:ident, $dir_override:ident, $anti_dir_override:ident, $store:expr ) => {
         match $store {
-            <$ty>::$v | <$ty>::$vo => (),
-            <$ty>::$av => $store = <$ty>::$vo,
-            <$ty>::$avo | <$ty>::None => $store = <$ty>::$v,
+            <$dir_enum>::$dir | <$dir_enum>::$dir_override => (),
+            <$dir_enum>::$anti_dir => $store = <$dir_enum>::$dir_override,
+            <$dir_enum>::$anti_dir_override | <$dir_enum>::None => $store = <$dir_enum>::$dir,
         }
     };
 }
 
+/// Updates the movement direction based on a released key.
+///
+/// The first argument is the type of the direction enum, which must include the
+/// None value and *Override values for the passed in directions. The second
+/// argument is the direction of the key released. The third argument is the
+/// opposite direction of the key released. The fourth argument is the stored
+/// direction.
 #[macro_export]
 macro_rules! released_event {
-    ( $ty:ty, $v:ident, $av:ident, $store:expr ) => {
-        paste! {
-            released_event!(
-                $ty,
-                $v,
-                $av,
-                [< $v Override >],
-                [< $av Override >],
-                $store
-            )
-        }
+    ( $dir_enum:ty, $dir:ident, $anti_dir:ident, $store:expr ) => {
+        paste!(released_event! {
+            @expanded
+            $dir_enum,
+            $dir,
+            $anti_dir,
+            [< $dir Override >],
+            [< $anti_dir Override >],
+            $store
+        })
     };
 
-    ( $ty:ty, $v:ident, $av:ident, $vo:ident, $avo:ident, $store:expr ) => {
+    ( @expanded $dir_enum:ty, $dir:ident, $anti_dir:ident, $dir_override:ident, $anti_dir_override:ident, $store:expr ) => {
         match $store {
-            <$ty>::$v | <$ty>::None => $store = <$ty>::None,
-            <$ty>::$vo | <$ty>::$avo => $store = <$ty>::$av,
-            <$ty>::$av => (),
+            <$dir_enum>::$dir | <$dir_enum>::None => $store = <$dir_enum>::None,
+            <$dir_enum>::$dir_override | <$dir_enum>::$anti_dir_override => {
+                $store = <$dir_enum>::$anti_dir
+            }
+            <$dir_enum>::$anti_dir => (),
         }
     };
 }
