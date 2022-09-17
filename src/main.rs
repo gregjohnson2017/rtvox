@@ -1,6 +1,6 @@
 use std::{f32::consts::PI, time::Instant};
 
-use camera::{Camera, LookEvent, MoveDirection};
+use camera::{Camera, LookEvent, MoveX, MoveY, MoveZ};
 use graphics::Graphics;
 use vulkano::instance::{Instance, InstanceCreateInfo};
 use vulkano_win::VkSurfaceBuild;
@@ -72,30 +72,100 @@ fn main() {
                     ..
                 },
             ..
-        } => {
-            let direction = match key {
-                VirtualKeyCode::W => Some(MoveDirection::Forward),
-                VirtualKeyCode::A => Some(MoveDirection::Left),
-                VirtualKeyCode::S => Some(MoveDirection::Backward),
-                VirtualKeyCode::D => Some(MoveDirection::Right),
-                VirtualKeyCode::LShift => Some(MoveDirection::Down),
-                VirtualKeyCode::Space => Some(MoveDirection::Up),
-                _ => None,
-            };
-            match direction {
-                None => (),
-                Some(direction) => match state {
-                    ElementState::Pressed => {
-                        started_moving = Some(Instant::now());
-                        camera.start_moving(direction);
-                    }
-                    ElementState::Released => {
-                        started_moving.map(|i| camera.stop_moving(i.elapsed()));
-                        started_moving.take();
-                    }
-                },
+        } => match state {
+            ElementState::Pressed => {
+                match key {
+                    VirtualKeyCode::W => match camera.move_state.z {
+                        MoveZ::Forward | MoveZ::ForwardOverride => (),
+                        MoveZ::Backward => camera.move_state.z = MoveZ::ForwardOverride,
+                        MoveZ::BackwardOverride | MoveZ::None => {
+                            camera.move_state.z = MoveZ::Forward
+                        }
+                    },
+                    VirtualKeyCode::A => match camera.move_state.x {
+                        MoveX::Left | MoveX::LeftOverride => (),
+                        MoveX::Right => camera.move_state.x = MoveX::LeftOverride,
+                        MoveX::RightOverride | MoveX::None => camera.move_state.x = MoveX::Left,
+                    },
+                    VirtualKeyCode::S => match camera.move_state.z {
+                        MoveZ::Backward | MoveZ::BackwardOverride => (),
+                        MoveZ::Forward => camera.move_state.z = MoveZ::BackwardOverride,
+                        MoveZ::ForwardOverride | MoveZ::None => {
+                            camera.move_state.z = MoveZ::Backward
+                        }
+                    },
+                    VirtualKeyCode::D => match camera.move_state.x {
+                        MoveX::Right | MoveX::RightOverride => (),
+                        MoveX::Left => camera.move_state.x = MoveX::RightOverride,
+                        MoveX::LeftOverride | MoveX::None => camera.move_state.x = MoveX::Right,
+                    },
+                    VirtualKeyCode::LShift => match camera.move_state.y {
+                        MoveY::Down | MoveY::DownOverride => (),
+                        MoveY::Up => camera.move_state.y = MoveY::DownOverride,
+                        MoveY::UpOverride | MoveY::None => camera.move_state.y = MoveY::Down,
+                    },
+                    VirtualKeyCode::Space => match camera.move_state.y {
+                        MoveY::Up | MoveY::UpOverride => (),
+                        MoveY::Down => camera.move_state.y = MoveY::UpOverride,
+                        MoveY::DownOverride | MoveY::None => camera.move_state.y = MoveY::Up,
+                    },
+                    _ => (),
+                }
+                match started_moving {
+                    None if camera.is_moving() => started_moving = Some(Instant::now()),
+                    _ => (),
+                }
             }
-        }
+            ElementState::Released => {
+                match key {
+                    VirtualKeyCode::W => match camera.move_state.z {
+                        MoveZ::Forward | MoveZ::None => camera.move_state.z = MoveZ::None,
+                        MoveZ::ForwardOverride | MoveZ::BackwardOverride => {
+                            camera.move_state.z = MoveZ::Backward
+                        }
+                        MoveZ::Backward => (),
+                    },
+                    VirtualKeyCode::A => match camera.move_state.x {
+                        MoveX::Left | MoveX::None => camera.move_state.x = MoveX::None,
+                        MoveX::LeftOverride | MoveX::RightOverride => {
+                            camera.move_state.x = MoveX::Right
+                        }
+                        MoveX::Right => (),
+                    },
+                    VirtualKeyCode::S => match camera.move_state.z {
+                        MoveZ::Backward | MoveZ::None => camera.move_state.z = MoveZ::None,
+                        MoveZ::BackwardOverride | MoveZ::ForwardOverride => {
+                            camera.move_state.z = MoveZ::Forward
+                        }
+                        MoveZ::Forward => (),
+                    },
+                    VirtualKeyCode::D => match camera.move_state.x {
+                        MoveX::Right | MoveX::None => camera.move_state.x = MoveX::None,
+                        MoveX::RightOverride | MoveX::LeftOverride => {
+                            camera.move_state.x = MoveX::Left
+                        }
+                        MoveX::Left => (),
+                    },
+                    VirtualKeyCode::LShift => match camera.move_state.y {
+                        MoveY::Down | MoveY::None => camera.move_state.y = MoveY::None,
+                        MoveY::DownOverride | MoveY::UpOverride => camera.move_state.y = MoveY::Up,
+                        MoveY::Up => (),
+                    },
+                    VirtualKeyCode::Space => match camera.move_state.y {
+                        MoveY::Up | MoveY::None => camera.move_state.y = MoveY::None,
+                        MoveY::UpOverride | MoveY::DownOverride => {
+                            camera.move_state.y = MoveY::Down
+                        }
+                        MoveY::Down => (),
+                    },
+                    _ => (),
+                }
+                match started_moving {
+                    Some(_) if !camera.is_moving() => started_moving = None,
+                    _ => (),
+                }
+            }
+        },
         Event::DeviceEvent {
             // dx and dy are in "unspecified units"
             event: DeviceEvent::MouseMotion { delta: (dx, dy) },

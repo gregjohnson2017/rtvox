@@ -17,7 +17,7 @@ pub struct Camera {
     pos: Vector3<f32>,
     quat: Quaternion<f32>,
     fov: f32,
-    dir: Option<MoveDirection>,
+    pub move_state: MoveState,
 }
 
 // right and down are angles in radians
@@ -26,14 +26,48 @@ pub struct LookEvent {
     pub down: f32,
 }
 
-#[derive(Copy, Clone)]
-pub enum MoveDirection {
-    Forward,
-    Backward,
+#[derive(Copy, Clone, Debug)]
+pub struct MoveState {
+    pub x: MoveX,
+    pub y: MoveY,
+    pub z: MoveZ,
+}
+
+impl Default for MoveState {
+    fn default() -> MoveState {
+        MoveState {
+            x: MoveX::None,
+            y: MoveY::None,
+            z: MoveZ::None,
+        }
+    }
+}
+
+#[derive(PartialEq, Copy, Clone, Debug)]
+pub enum MoveX {
     Left,
+    LeftOverride,
     Right,
+    RightOverride,
+    None,
+}
+
+#[derive(PartialEq, Copy, Clone, Debug)]
+pub enum MoveY {
     Up,
+    UpOverride,
     Down,
+    DownOverride,
+    None,
+}
+
+#[derive(PartialEq, Copy, Clone, Debug)]
+pub enum MoveZ {
+    Forward,
+    ForwardOverride,
+    Backward,
+    BackwardOverride,
+    None,
 }
 
 impl Camera {
@@ -42,7 +76,7 @@ impl Camera {
             pos: pos,
             quat: (1.0, [0.0, 0.0, 0.0]),
             fov,
-            dir: None,
+            move_state: MoveState::default(),
         }
     }
 
@@ -54,35 +88,34 @@ impl Camera {
         self.quat = quaternion::mul(quat_y, self.quat);
     }
 
-    pub fn start_moving(&mut self, direction: MoveDirection) {
-        self.dir = Some(direction)
-    }
-
-    pub fn update_position(&mut self, duration: Duration) {
-        match self.dir {
-            None => (),
-            Some(dir) => {
-                let (abs, dir) = match dir {
-                    MoveDirection::Forward => (false, FORWARD),
-                    MoveDirection::Backward => (false, BACKWARD),
-                    MoveDirection::Left => (false, LEFT),
-                    MoveDirection::Right => (false, RIGHT),
-                    MoveDirection::Up => (true, UP),
-                    MoveDirection::Down => (true, DOWN),
-                };
-                let movement = vecmath::vec3_scale(dir, duration.as_secs_f32());
-                if abs {
-                    self.move_absolute(movement)
-                } else {
-                    self.move_relative(movement);
-                }
+    pub fn update_position(&mut self, dur: Duration) {
+        match self.move_state.x {
+            MoveX::Left | MoveX::LeftOverride => {
+                self.move_relative(vecmath::vec3_scale(LEFT, dur.as_secs_f32()))
             }
+            MoveX::Right | MoveX::RightOverride => {
+                self.move_relative(vecmath::vec3_scale(RIGHT, dur.as_secs_f32()))
+            }
+            MoveX::None => (),
         }
-    }
-
-    pub fn stop_moving(&mut self, duration: Duration) {
-        self.update_position(duration);
-        self.dir = None
+        match self.move_state.y {
+            MoveY::Up | MoveY::UpOverride => {
+                self.move_absolute(vecmath::vec3_scale(UP, dur.as_secs_f32()))
+            }
+            MoveY::Down | MoveY::DownOverride => {
+                self.move_absolute(vecmath::vec3_scale(DOWN, dur.as_secs_f32()))
+            }
+            MoveY::None => (),
+        }
+        match self.move_state.z {
+            MoveZ::Forward | MoveZ::ForwardOverride => {
+                self.move_relative(vecmath::vec3_scale(FORWARD, dur.as_secs_f32()))
+            }
+            MoveZ::Backward | MoveZ::BackwardOverride => {
+                self.move_relative(vecmath::vec3_scale(BACKWARD, dur.as_secs_f32()))
+            }
+            MoveZ::None => (),
+        }
     }
 
     pub fn get_camera_info(&self) -> CameraInfo {
@@ -92,6 +125,17 @@ impl Camera {
             target,
             fov: self.fov,
             eye: self.pos,
+        }
+    }
+
+    pub fn is_moving(&self) -> bool {
+        if self.move_state.x == MoveX::None
+            && self.move_state.y == MoveY::None
+            && self.move_state.z == MoveZ::None
+        {
+            return false;
+        } else {
+            return true;
         }
     }
 
@@ -127,7 +171,7 @@ mod tests {
     fn test_stop_moving_doesnt_move() {
         let mut camera = Camera::new([0.0, 0.0, 0.0], PI / 2.0);
 
-        camera.stop_moving(Duration::from_secs(1));
+        camera.update_position(Duration::from_secs(1));
 
         let info = camera.get_camera_info();
         assert_eq!(info.eye, [0.0, 0.0, 0.0]);
@@ -137,8 +181,11 @@ mod tests {
     fn test_moving_from_position() {
         let mut camera = Camera::new([0.0, 1.0, 0.0], PI / 2.0);
 
-        camera.start_moving(MoveDirection::Forward);
-        camera.stop_moving(Duration::from_secs(1));
+        camera.move_state = MoveState {
+            z: MoveZ::Forward,
+            ..Default::default()
+        };
+        camera.update_position(Duration::from_secs(1));
 
         let info = camera.get_camera_info();
         assert_eq!(info.eye, [0.0, 1.0, -3.0]);
@@ -152,8 +199,11 @@ mod tests {
             right: PI,
             down: 0.0,
         });
-        camera.start_moving(MoveDirection::Forward);
-        camera.stop_moving(Duration::from_secs(1));
+        camera.move_state = MoveState {
+            z: MoveZ::Forward,
+            ..Default::default()
+        };
+        camera.update_position(Duration::from_secs(1));
 
         let info = camera.get_camera_info();
         assert_about_eq(info.eye, [0.0, 0.0, 3.0]);
@@ -167,8 +217,11 @@ mod tests {
             right: 0.0,
             down: PI / 2.0,
         });
-        camera.start_moving(MoveDirection::Forward);
-        camera.stop_moving(Duration::from_secs(1));
+        camera.move_state = MoveState {
+            z: MoveZ::Forward,
+            ..Default::default()
+        };
+        camera.update_position(Duration::from_secs(1));
 
         let info = camera.get_camera_info();
         assert_about_eq(info.eye, [0.0, -3.0, 0.0]);
@@ -182,8 +235,11 @@ mod tests {
             right: 0.0,
             down: PI / 2.0,
         });
-        camera.start_moving(MoveDirection::Up);
-        camera.stop_moving(Duration::from_secs(1));
+        camera.move_state = MoveState {
+            y: MoveY::Up,
+            ..Default::default()
+        };
+        camera.update_position(Duration::from_secs(1));
 
         let info = camera.get_camera_info();
         assert_about_eq(info.eye, [0.0, 3.0, 0.0]);
@@ -193,7 +249,10 @@ mod tests {
     fn test_update_position_short() {
         let mut camera = Camera::new([0.0, 0.0, 0.0], PI / 2.0);
 
-        camera.start_moving(MoveDirection::Down);
+        camera.move_state = MoveState {
+            y: MoveY::Down,
+            ..Default::default()
+        };
         camera.update_position(Duration::from_secs(1));
 
         let info = camera.get_camera_info();
@@ -202,46 +261,67 @@ mod tests {
 
     #[test]
     fn test_moving_directions() {
-        let tests: Vec<([f32; 3], MoveDirection, Duration, [f32; 3])> = vec![
+        let tests: Vec<([f32; 3], MoveState, Duration, [f32; 3])> = vec![
             (
                 [0.0, 0.0, 0.0],
-                MoveDirection::Forward,
+                MoveState {
+                    z: MoveZ::Forward,
+                    ..Default::default()
+                },
                 Duration::from_secs(1),
                 [0.0, 0.0, -3.0],
             ),
             (
                 [0.0, 0.0, 0.0],
-                MoveDirection::Forward,
+                MoveState {
+                    z: MoveZ::Forward,
+                    ..Default::default()
+                },
                 Duration::from_secs(5),
                 [0.0, 0.0, -15.0],
             ),
             (
                 [0.0, 0.0, 0.0],
-                MoveDirection::Backward,
+                MoveState {
+                    z: MoveZ::Backward,
+                    ..Default::default()
+                },
                 Duration::from_secs(1),
                 [0.0, 0.0, 3.0],
             ),
             (
                 [0.0, 0.0, 0.0],
-                MoveDirection::Left,
+                MoveState {
+                    x: MoveX::Left,
+                    ..Default::default()
+                },
                 Duration::from_secs(2),
                 [-6.0, 0.0, 0.0],
             ),
             (
                 [0.0, 0.0, 0.0],
-                MoveDirection::Right,
+                MoveState {
+                    x: MoveX::Right,
+                    ..Default::default()
+                },
                 Duration::from_secs(4),
                 [12.0, 0.0, 0.0],
             ),
             (
                 [0.0, 0.0, 0.0],
-                MoveDirection::Up,
+                MoveState {
+                    y: MoveY::Up,
+                    ..Default::default()
+                },
                 Duration::from_secs_f32(0.5),
                 [0.0, 1.5, 0.0],
             ),
             (
                 [0.0, 0.0, 0.0],
-                MoveDirection::Down,
+                MoveState {
+                    y: MoveY::Down,
+                    ..Default::default()
+                },
                 Duration::from_secs(2),
                 [0.0, -6.0, 0.0],
             ),
@@ -249,8 +329,8 @@ mod tests {
         tests.iter().for_each(move |(pos, dir, dur, expect)| {
             let mut camera = Camera::new(*pos, PI / 2.0);
 
-            camera.start_moving(*dir);
-            camera.stop_moving(*dur);
+            camera.move_state = *dir;
+            camera.update_position(*dur);
 
             let info = camera.get_camera_info();
             assert_eq!(info.eye, *expect);
