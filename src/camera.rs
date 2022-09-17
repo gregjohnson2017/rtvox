@@ -89,32 +89,39 @@ impl Camera {
     }
 
     pub fn update_position(&mut self, dur: Duration) {
-        match self.move_state.x {
-            MoveX::Left | MoveX::LeftOverride => {
-                self.move_relative(vecmath::vec3_scale(LEFT, dur.as_secs_f32()))
+        {
+            use MoveX::*;
+            match self.move_state.x {
+                Left | LeftOverride => {
+                    self.move_relative(vecmath::vec3_scale(LEFT, dur.as_secs_f32()))
+                }
+                Right | RightOverride => {
+                    self.move_relative(vecmath::vec3_scale(RIGHT, dur.as_secs_f32()))
+                }
+                None => (),
             }
-            MoveX::Right | MoveX::RightOverride => {
-                self.move_relative(vecmath::vec3_scale(RIGHT, dur.as_secs_f32()))
-            }
-            MoveX::None => (),
         }
-        match self.move_state.y {
-            MoveY::Up | MoveY::UpOverride => {
-                self.move_absolute(vecmath::vec3_scale(UP, dur.as_secs_f32()))
+        {
+            use MoveY::*;
+            match self.move_state.y {
+                Up | UpOverride => self.move_absolute(vecmath::vec3_scale(UP, dur.as_secs_f32())),
+                Down | DownOverride => {
+                    self.move_absolute(vecmath::vec3_scale(DOWN, dur.as_secs_f32()))
+                }
+                None => (),
             }
-            MoveY::Down | MoveY::DownOverride => {
-                self.move_absolute(vecmath::vec3_scale(DOWN, dur.as_secs_f32()))
-            }
-            MoveY::None => (),
         }
-        match self.move_state.z {
-            MoveZ::Forward | MoveZ::ForwardOverride => {
-                self.move_relative(vecmath::vec3_scale(FORWARD, dur.as_secs_f32()))
+        {
+            use MoveZ::*;
+            match self.move_state.z {
+                Forward | ForwardOverride => {
+                    self.move_relative(vecmath::vec3_scale(FORWARD, dur.as_secs_f32()))
+                }
+                Backward | BackwardOverride => {
+                    self.move_relative(vecmath::vec3_scale(BACKWARD, dur.as_secs_f32()))
+                }
+                None => (),
             }
-            MoveZ::Backward | MoveZ::BackwardOverride => {
-                self.move_relative(vecmath::vec3_scale(BACKWARD, dur.as_secs_f32()))
-            }
-            MoveZ::None => (),
         }
     }
 
@@ -157,6 +164,9 @@ mod tests {
     use std::f32::consts::PI;
 
     use super::*;
+    use MoveX::*;
+    use MoveY::*;
+    use MoveZ::*;
 
     fn assert_about_eq(left: Vector3<f32>, right: Vector3<f32>) {
         const TOLERANCE: f32 = 0.001;
@@ -182,7 +192,7 @@ mod tests {
         let mut camera = Camera::new([0.0, 1.0, 0.0], PI / 2.0);
 
         camera.move_state = MoveState {
-            z: MoveZ::Forward,
+            z: Forward,
             ..Default::default()
         };
         camera.update_position(Duration::from_secs(1));
@@ -200,7 +210,7 @@ mod tests {
             down: 0.0,
         });
         camera.move_state = MoveState {
-            z: MoveZ::Forward,
+            z: Forward,
             ..Default::default()
         };
         camera.update_position(Duration::from_secs(1));
@@ -218,7 +228,7 @@ mod tests {
             down: PI / 2.0,
         });
         camera.move_state = MoveState {
-            z: MoveZ::Forward,
+            z: Forward,
             ..Default::default()
         };
         camera.update_position(Duration::from_secs(1));
@@ -236,7 +246,7 @@ mod tests {
             down: PI / 2.0,
         });
         camera.move_state = MoveState {
-            y: MoveY::Up,
+            y: Up,
             ..Default::default()
         };
         camera.update_position(Duration::from_secs(1));
@@ -250,7 +260,7 @@ mod tests {
         let mut camera = Camera::new([0.0, 0.0, 0.0], PI / 2.0);
 
         camera.move_state = MoveState {
-            y: MoveY::Down,
+            y: Down,
             ..Default::default()
         };
         camera.update_position(Duration::from_secs(1));
@@ -265,7 +275,7 @@ mod tests {
             (
                 [0.0, 0.0, 0.0],
                 MoveState {
-                    z: MoveZ::Forward,
+                    z: Forward,
                     ..Default::default()
                 },
                 Duration::from_secs(1),
@@ -274,7 +284,7 @@ mod tests {
             (
                 [0.0, 0.0, 0.0],
                 MoveState {
-                    z: MoveZ::Forward,
+                    z: Forward,
                     ..Default::default()
                 },
                 Duration::from_secs(5),
@@ -283,7 +293,7 @@ mod tests {
             (
                 [0.0, 0.0, 0.0],
                 MoveState {
-                    z: MoveZ::Backward,
+                    z: Backward,
                     ..Default::default()
                 },
                 Duration::from_secs(1),
@@ -292,7 +302,7 @@ mod tests {
             (
                 [0.0, 0.0, 0.0],
                 MoveState {
-                    x: MoveX::Left,
+                    x: Left,
                     ..Default::default()
                 },
                 Duration::from_secs(2),
@@ -301,7 +311,7 @@ mod tests {
             (
                 [0.0, 0.0, 0.0],
                 MoveState {
-                    x: MoveX::Right,
+                    x: Right,
                     ..Default::default()
                 },
                 Duration::from_secs(4),
@@ -310,7 +320,7 @@ mod tests {
             (
                 [0.0, 0.0, 0.0],
                 MoveState {
-                    y: MoveY::Up,
+                    y: Up,
                     ..Default::default()
                 },
                 Duration::from_secs_f32(0.5),
@@ -319,7 +329,7 @@ mod tests {
             (
                 [0.0, 0.0, 0.0],
                 MoveState {
-                    y: MoveY::Down,
+                    y: Down,
                     ..Default::default()
                 },
                 Duration::from_secs(2),
