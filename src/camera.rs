@@ -136,14 +136,9 @@ impl Camera {
     }
 
     pub fn is_moving(&self) -> bool {
-        if self.move_state.x == MoveX::None
-            && self.move_state.y == MoveY::None
-            && self.move_state.z == MoveZ::None
-        {
-            return false;
-        } else {
-            return true;
-        }
+        self.move_state.x != MoveX::None
+            || self.move_state.y != MoveY::None
+            || self.move_state.z != MoveZ::None
     }
 
     // translation in a direction relative to current camera direction
