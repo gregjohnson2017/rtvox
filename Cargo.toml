@@ -8,6 +8,7 @@ edition = "2021"
 [dependencies]
 ash = "0.37.0"
 bytemuck = "1.12.1"
+paste = "1.0.9"
 png = "0.17.6"
 quaternion = "0.4.1"
 raw-window-handle = "0.5.0"
