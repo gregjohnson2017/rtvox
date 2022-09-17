@@ -95,52 +95,22 @@ fn main() {
             ElementState::Released => {
                 match key {
                     VirtualKeyCode::W => {
-                        use MoveZ::*;
-                        match camera.move_state.z {
-                            Forward | None => camera.move_state.z = None,
-                            ForwardOverride | BackwardOverride => camera.move_state.z = Backward,
-                            Backward => (),
-                        }
+                        released_event!(MoveZ, Forward, Backward, camera.move_state.z)
                     }
                     VirtualKeyCode::A => {
-                        use MoveX::*;
-                        match camera.move_state.x {
-                            Left | None => camera.move_state.x = None,
-                            LeftOverride | RightOverride => camera.move_state.x = Right,
-                            Right => (),
-                        }
+                        released_event!(MoveX, Left, Right, camera.move_state.x)
                     }
                     VirtualKeyCode::S => {
-                        use MoveZ::*;
-                        match camera.move_state.z {
-                            Backward | None => camera.move_state.z = None,
-                            BackwardOverride | ForwardOverride => camera.move_state.z = Forward,
-                            Forward => (),
-                        }
+                        released_event!(MoveZ, Backward, Forward, camera.move_state.z)
                     }
                     VirtualKeyCode::D => {
-                        use MoveX::*;
-                        match camera.move_state.x {
-                            Right | None => camera.move_state.x = None,
-                            RightOverride | LeftOverride => camera.move_state.x = Left,
-                            Left => (),
-                        }
+                        released_event!(MoveX, Right, Left, camera.move_state.x)
                     }
                     VirtualKeyCode::LShift => {
-                        use MoveY::*;
-                        match camera.move_state.y {
-                            Down | None => camera.move_state.y = None,
-                            DownOverride | UpOverride => camera.move_state.y = Up,
-                            Up => (),
-                        }
+                        released_event!(MoveY, Down, Up, camera.move_state.y)
                     }
                     VirtualKeyCode::Space => {
-                        use MoveY::*;
-                        match camera.move_state.y {
-                            Up | None => camera.move_state.y = None,
-                            UpOverride | DownOverride => camera.move_state.y = Down,
-                            Down => (),
-                        }
+                        released_event!(MoveY, Up, Down, camera.move_state.y)
                     }
                     _ => (),
                 }
@@ -199,6 +169,30 @@ macro_rules! pressed_event {
             <$ty>::$v | <$ty>::$vo => (),
             <$ty>::$av => $store = <$ty>::$vo,
             <$ty>::$avo | <$ty>::None => $store = <$ty>::$v,
+        }
+    };
+}
+
+#[macro_export]
+macro_rules! released_event {
+    ( $ty:ty, $v:ident, $av:ident, $store:expr ) => {
+        paste! {
+            released_event!(
+                $ty,
+                $v,
+                $av,
+                [< $v Override >],
+                [< $av Override >],
+                $store
+            )
+        }
+    };
+
+    ( $ty:ty, $v:ident, $av:ident, $vo:ident, $avo:ident, $store:expr ) => {
+        match $store {
+            <$ty>::$v | <$ty>::None => $store = <$ty>::None,
+            <$ty>::$vo | <$ty>::$avo => $store = <$ty>::$av,
+            <$ty>::$av => (),
         }
     };
 }
