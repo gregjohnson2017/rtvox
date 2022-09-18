@@ -3,17 +3,18 @@ use vulkano::{
     buffer::{BufferUsage, CpuAccessibleBuffer},
     command_buffer::{
         AutoCommandBufferBuilder, BlitImageInfo, ClearColorImageInfo, CommandBufferUsage,
+        CopyBufferToImageInfo, PrimaryCommandBuffer,
     },
     descriptor_set::{PersistentDescriptorSet, WriteDescriptorSet},
     device::{
         physical::{PhysicalDevice, PhysicalDeviceType},
-        Device, DeviceCreateInfo, DeviceExtensions, Queue, QueueCreateInfo,
+        Device, DeviceCreateInfo, DeviceExtensions, Features, Queue, QueueCreateInfo,
     },
     format::Format,
     image::{
         view::{ImageView, ImageViewCreateInfo, ImageViewType},
-        ImageAccess, ImageDimensions, ImageLayout, ImageUsage, ImmutableImage, MipmapsCount,
-        StorageImage, SwapchainImage,
+        ImageAccess, ImageCreateFlags, ImageDimensions, ImageLayout, ImageUsage, StorageImage,
+        SwapchainImage,
     },
     memory::pool::StdMemoryPool,
     pipeline::{ComputePipeline, Pipeline, PipelineBindPoint},
@@ -39,17 +40,30 @@ pub struct Graphics {
     queue: Arc<Queue>,
     compute_pipeline: Arc<ComputePipeline>,
     camera_info: Arc<CpuAccessibleBuffer<cs::ty::CameraInfo>>,
-    // cube_map_array: Arc<ImageView<ImmutableImage>>,
+    cube_map_array: Arc<ImageView<StorageImage>>,
 }
+
+#[derive(Debug)]
+pub enum GraphicsCreationError {
+    CubeMapImageNotRGBA,
+}
+
 impl Graphics {
-    pub fn new(surface: Arc<Surface<Window>>, camera_info: CameraInfo) -> Self {
+    pub fn new(
+        surface: Arc<Surface<Window>>,
+        camera_info: CameraInfo,
+    ) -> Result<Self, GraphicsCreationError> {
         let device_extensions = DeviceExtensions {
             khr_swapchain: true,
             ..DeviceExtensions::none()
         };
-
+        let features = Features {
+            image_cube_array: true,
+            ..Features::none()
+        };
         let (physical_device, queue_family) = PhysicalDevice::enumerate(surface.instance())
             .filter(|&p| p.supported_extensions().is_superset_of(&device_extensions))
+            .filter(|p| p.supported_features().is_superset_of(&features))
             .filter_map(|p| {
                 p.queue_families()
                     .find(|&q| {
@@ -77,6 +91,7 @@ impl Graphics {
             physical_device,
             DeviceCreateInfo {
                 enabled_extensions: device_extensions,
+                enabled_features: features,
                 queue_create_infos: vec![QueueCreateInfo::family(queue_family)],
 
                 ..DeviceCreateInfo::default()
@@ -144,50 +159,100 @@ impl Graphics {
         )
         .unwrap();
 
-        // let png_bytes = include_bytes!("sprite_sheet.png").to_vec();
-        // let cursor = Cursor::new(png_bytes.clone());
-        // let decoder = png::Decoder::new(cursor);
-        // let mut reader = decoder.read_info().unwrap();
-        // let info = reader.info();
-        // let dimensions = ImageDimensions::Dim2d {
-        //     width: info.width,
-        //     height: info.height,
-        //     array_layers: (36 * info.height) / info.width,
-        // }; // Replace with your actual image array dimensions
-        // let mut image_data = Vec::new();
-        // image_data.resize((info.width * info.height * 4) as usize, 0);
-        // reader.next_frame(&mut image_data).unwrap();
-        // let (tex_image, tex_future) = ImmutableImage::from_iter(
-        //     png_bytes.clone(),
-        //     dimensions,
-        //     MipmapsCount::Log2,
-        //     Format::R8G8B8A8_SRGB,
-        //     queue.clone(),
-        // )
-        // .unwrap();
-        // // TODO need sampler?
-        // let cube_map_array = ImageView::new(
-        //     tex_image.clone(),
-        //     ImageViewCreateInfo {
-        //         view_type: ImageViewType::CubeArray,
-        //         ..ImageViewCreateInfo::from_image(tex_image.clone().as_ref())
-        //     },
-        // )
-        // .unwrap();
+        let png_bytes = include_bytes!("cubemap.png").to_vec();
+        let cursor = Cursor::new(png_bytes.clone());
+        let mut decoder = png::Decoder::new(cursor);
+        if decoder.read_header_info().unwrap().color_type != png::ColorType::Rgba {
+            return Err(GraphicsCreationError::CubeMapImageNotRGBA);
+        }
+        let mut reader = decoder.read_info().unwrap();
+        let info = reader.info();
+        let (width, height) = (info.width, info.height);
+        let mut image_data = Vec::new();
+        image_data.resize((width * height * 4) as usize, 0);
+        reader.next_frame(&mut image_data).unwrap();
+        let face_size = width / 6;
+        let dimensions = ImageDimensions::Dim2d {
+            width: face_size,
+            height: face_size,
+            array_layers: (36 * height) / width,
+        };
 
-        Self {
+        let data = image_data.as_slice();
+        let mut reshaped_image_data = Vec::new();
+        let n_cubemaps = height / face_size;
+        for l in 0..n_cubemaps {
+            for i in 0..6 {
+                for j in 0..face_size {
+                    let start = (j * 6 + i + l * 6 * face_size) * 4 * face_size;
+                    let end = start + face_size * 4;
+                    let mut part = data[start as usize..end as usize].to_vec();
+                    reshaped_image_data.append(&mut part);
+                }
+            }
+        }
+
+        let tex_image = StorageImage::with_usage(
+            device.clone(),
+            dimensions,
+            Format::R8G8B8A8_UNORM,
+            ImageUsage {
+                transfer_dst: true,
+                storage: true,
+                ..ImageUsage::none()
+            },
+            ImageCreateFlags {
+                cube_compatible: true,
+                ..Default::default()
+            },
+            Some(queue_family),
+        )
+        .unwrap();
+        let mut cbb = AutoCommandBufferBuilder::primary(
+            device.clone(),
+            queue.family(),
+            CommandBufferUsage::OneTimeSubmit,
+        )
+        .unwrap();
+        let image_data_buf = CpuAccessibleBuffer::from_iter(
+            queue.device().clone(),
+            BufferUsage::transfer_src(),
+            false,
+            reshaped_image_data,
+        )
+        .unwrap();
+
+        cbb.copy_buffer_to_image(CopyBufferToImageInfo::buffer_image(
+            image_data_buf.clone(),
+            tex_image.clone(),
+        ))
+        .unwrap();
+        let cb = cbb.build().unwrap();
+        let tex_future = match cb.execute(queue.clone()) {
+            Ok(f) => f,
+            Err(e) => unreachable!("{:?}", e),
+        };
+        let cube_map_array = ImageView::new(
+            tex_image.clone(),
+            ImageViewCreateInfo {
+                view_type: ImageViewType::CubeArray,
+                ..ImageViewCreateInfo::from_image(&tex_image)
+            },
+        )
+        .unwrap();
+
+        Ok(Self {
             surface,
             recreate_swapchain: false,
-            // previous_frame_end: Some(tex_future.boxed()),
-            previous_frame_end: Some(sync::now(device.clone()).boxed()),
+            previous_frame_end: Some(tex_future.boxed()),
             swapchain,
             swapchain_images,
             storage_image,
             queue,
             compute_pipeline,
             camera_info: Self::create_camera_info_buffer(device, camera_info),
-            // cube_map_array,
-        }
+            cube_map_array,
+        })
     }
 
     pub fn redraw(&mut self) {
@@ -260,7 +325,7 @@ impl Graphics {
                     ImageView::new_default(self.storage_image.clone()).unwrap(),
                 ),
                 WriteDescriptorSet::buffer(1, self.camera_info.clone()),
-                // WriteDescriptorSet::image_view(2, self.cube_map_array.clone()),
+                WriteDescriptorSet::image_view(2, self.cube_map_array.clone()),
             ],
         )
         .unwrap();

@@ -10,7 +10,7 @@ layout(set = 0, binding = 1) uniform CameraInfo {
     vec3 target;
 } uniforms;
 
-// layout(set = 0, binding = 2, rgba8) uniform imageCubeArray cubeMapArray;
+layout(set = 0, binding = 2, rgba8) uniform imageCubeArray cubeMapArray;
 
 vec3 calculate_ray() {
     float x = float(gl_GlobalInvocationID.x);
@@ -47,10 +47,11 @@ vec3 calculate_ray() {
 #define XY 2
 
 vec3 hit_aabb(vec3 ray) {
-    vec3 miss_col = vec3(0.0, 0.0, 0.0);
+    vec3 miss_col = vec3(1.0, 1.0, 1.0);
     vec3 center = vec3(0.0, 0.0, -5.0);
+    float voxelSize = 1.0;
     vec3 minB = vec3(-0.5, -0.5, -5.5);
-    vec3 maxB = vec3(0.5, 0.5, -4.5);
+    vec3 maxB = minB + voxelSize;
     vec3 origin = uniforms.eye;
     vec3 dir = ray;
     vec3 coord = vec3(0.0, 0.0, 0.0);
@@ -110,35 +111,34 @@ vec3 hit_aabb(vec3 ray) {
 		}
     }
 
-    // demonstration of hit coord
-    if (coord[0] > 0 && coord[1] > 0 && coord[2] > -5) {
-        return vec3(0.2, 0.2, 0.2);
-    }
-    // int block_type = 4;
-    // return imageLoad(cubeMapArray, ivec3(0,0,block_type)).xyz;
+    int face_size = imageSize(cubeMapArray).x;
+    vec3 uv = face_size * (coord - minB) / voxelSize;
+    vec3 st = face_size - uv;
+    int block_type = 11;
+    int base_idx = block_type * 6;
     if (whichPlane == XZ) {
         if (coord[1] > minB.y) {
             // top
-            return vec3(1.0, 0.0, 0.0);
+            return imageLoad(cubeMapArray, ivec3(uv.x,uv.z,base_idx+2)).xyz;
         } else {
             // bottom
-            return vec3(1.0, 1.0, 0.0);
+            return imageLoad(cubeMapArray, ivec3(st.x,st.z,base_idx+3)).xyz;
         }
     } else if (whichPlane == YZ) {
         if (coord[0] > minB.x) {
             // right
-            return vec3(0.0, 1.0, 1.0);
+            return imageLoad(cubeMapArray, ivec3(st.z,st.y,base_idx)).xyz;
         } else {
             // left
-            return vec3(0.0, 1.0, 0.0);
+            return imageLoad(cubeMapArray, ivec3(uv.z,st.y,base_idx+1)).xyz;
         }
     } else {
         if (coord[2] > minB.z) {
             // back
-            return vec3(1.0, 0.0, 1.0);
+            return imageLoad(cubeMapArray, ivec3(uv.x,uv.y,base_idx+4)).xyz;
         } else {
             // front
-            return vec3(0.0, 0.0, 1.0);
+            return imageLoad(cubeMapArray, ivec3(st.x,st.y,base_idx+5)).xyz;
         }
     }
 }
@@ -149,5 +149,5 @@ void main() {
 
     vec3 ray = calculate_ray();
     vec3 col = hit_aabb(ray);
-    imageStore(img, ivec2(x, y), vec4(col, 0));
+    imageStore(img, ivec2(x, y), vec4(col, 1.0));
 }
