@@ -307,7 +307,6 @@ impl Graphics {
         }
 
         let future = self.previous_frame_end.take().unwrap().join(acquire_future);
-        // let compute_future = compute_runner.compute(future.boxed());
 
         let mut builder = AutoCommandBufferBuilder::primary(
             self.queue.device().clone(),
