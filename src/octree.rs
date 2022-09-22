@@ -3,47 +3,67 @@ use vecmath::Vector3;
 use crate::aabc::Aabc;
 
 pub struct Octree<T: Copy> {
-    root: Child<T>,
-}
-
-#[derive(PartialEq, Debug)]
-enum Child<T: Copy> {
-    Leaf(Leaf<T>),
-    Node(Box<Node<T>>),
-    None,
-}
-
-#[derive(PartialEq, Debug, Copy, Clone)]
-pub struct Leaf<T: Copy> {
-    pos: Vector3<i32>,
-    data: T,
+    root: Option<Box<Node<T>>>,
 }
 
 #[derive(PartialEq, Debug)]
 struct Node<T: Copy> {
-    children: [Child<T>; 8],
+    data: NodeData<T>,
     aabc: Aabc,
 }
 
+#[derive(PartialEq, Debug)]
+enum NodeData<T: Copy> {
+    Children([Option<Box<Node<T>>>; 8]),
+    Value(T),
+}
+
+impl<T: Copy> Clone for Box<Node<T>> {
+    fn clone(&self) -> Self {
+        match &self.data {
+            NodeData::Children(children) => {
+                let mut new_children = [None, None, None, None, None, None, None, None];
+                for i in 0..children.len() {
+                    match &children[i] {
+                        Some(child) => new_children[i] = Some(child.clone()),
+                        _ => (),
+                    }
+                }
+                Box::new(Node {
+                    data: NodeData::Children(new_children),
+                    aabc: self.aabc,
+                })
+            }
+            NodeData::Value(v) => Box::new(Node {
+                data: NodeData::Value(*v),
+                aabc: self.aabc,
+            }),
+        }
+    }
+}
+
 impl<T: Copy> Node<T> {
-    fn empty(aabc: Aabc) -> Box<Node<T>> {
+    fn empty(origin: Vector3<i32>, size: u32) -> Box<Node<T>> {
         Box::new(Node {
-            children: [
-                Child::None,
-                Child::None,
-                Child::None,
-                Child::None,
-                Child::None,
-                Child::None,
-                Child::None,
-                Child::None,
-            ],
-            aabc,
+            data: NodeData::Children([None, None, None, None, None, None, None, None]),
+            aabc: Aabc { origin, size },
         })
     }
 
-    fn get_child_idx(&self, p: Vector3<i32>, off: i32) -> usize {
+    pub fn new_leaf(data: T, pos: Vector3<i32>) -> Box<Node<T>> {
+        Box::new(Node {
+            data: NodeData::Value(data),
+            aabc: Aabc {
+                origin: pos,
+                size: 1,
+            },
+        })
+    }
+
+    fn get_child_idx(&self, child: &Box<Node<T>>) -> usize {
         let min = self.aabc.origin;
+        let p = child.aabc.origin;
+        let off = child.aabc.size as i32;
         if p == [min[0], min[1], min[2]] {
             return 6;
         } else if p == [min[0] + off, min[1], min[2]] {
@@ -65,85 +85,70 @@ impl<T: Copy> Node<T> {
         }
     }
 
-    fn add_child(&mut self, child: Child<T>) -> usize {
-        match child {
-            Child::Leaf(leaf) => {
-                if !self.aabc.contains(leaf.pos) {
-                    panic!("child outside parent");
-                }
-                if self.aabc.size != 2 {
-                    panic!("parent not size 2");
-                }
-                let idx = self.get_child_idx(leaf.pos, 1);
-                self.children[idx] = child;
+    fn add_child(&mut self, child: Box<Node<T>>) -> usize {
+        if !self.aabc.contains(child.aabc.origin) {
+            panic!("child outside parent");
+        }
+        if self.aabc.size != child.aabc.size * 2 {
+            panic!("parent not twice as big as child");
+        }
+        let idx = self.get_child_idx(&child);
+        match self.data {
+            NodeData::Children(ref mut children) => {
+                children[idx] = Some(child);
                 idx
             }
-            Child::Node(ref node) => {
-                if !self.aabc.contains(node.aabc.origin) {
-                    panic!("child outside parent");
-                }
-                if self.aabc.size != node.aabc.size * 2 {
-                    panic!("parent not twice child");
-                }
-                let off = self.aabc.size as i32 / 2;
-                let idx = self.get_child_idx(node.aabc.origin, off);
-                self.children[idx] = child;
-                idx
-            }
-            Child::None => panic!("parent is none"),
+            NodeData::Value(_) => panic!("cannot add a child to a leaf node"),
         }
     }
 }
 
 impl<T: Copy> Octree<T> {
     pub fn new() -> Self {
-        Octree { root: Child::None }
+        Octree { root: None }
     }
 
-    fn add_down(curr: &mut Box<Node<T>>, target_leaf: Leaf<T>) {
+    fn add_down(curr: &mut Box<Node<T>>, target: Box<Node<T>>) {
         if curr.aabc.size > 2 {
-            let n = Node::empty(curr.aabc.shrink_towards(target_leaf.pos));
-            let idx = curr.add_child(Child::Node(n));
-            match curr.children[idx] {
-                Child::Node(ref mut node) => {
-                    Self::add_down(node, target_leaf);
-                }
-                _ => (),
+            let shrunken = curr.aabc.shrink_towards(target.aabc.origin);
+            let n = Node::empty(shrunken.origin, shrunken.size);
+            let idx = curr.add_child(n);
+            match &mut curr.data {
+                NodeData::Children(ref mut children) => match children[idx] {
+                    Some(ref mut child) => Self::add_down(child, target),
+                    None => unreachable!(),
+                },
+                NodeData::Value(_) => unreachable!(),
             }
         } else {
-            curr.add_child(Child::Leaf(target_leaf));
+            curr.add_child(target);
         }
     }
 
-    pub fn insert_leaf(&mut self, new_leaf: Leaf<T>) {
-        match self.root {
-            Child::None => self.root = Child::Leaf(new_leaf),
-            Child::Leaf(old_leaf) if old_leaf.pos == new_leaf.pos => {
-                panic!("overwrote root leaf")
+    pub fn insert_leaf(&mut self, leaf: Box<Node<T>>) {
+        match leaf.data {
+            NodeData::Children(_) => panic!("leaf had children"),
+            NodeData::Value(_) if leaf.aabc.size != 1 => {
+                panic!("leaf was not size 1")
             }
-            Child::Leaf(old_leaf) => {
-                /*
-                The root of the tree pointed to 1 leaf. Create a node structure that includes the old and new leaf.
-                */
-                let leaf_aabc = Aabc {
-                    origin: old_leaf.pos,
-                    size: 1,
-                };
-                let mut curr = Node::empty(leaf_aabc.expand_towards(new_leaf.pos));
-                curr.add_child(Child::Leaf(old_leaf));
-                while !curr.aabc.contains(new_leaf.pos) {
-                    let mut n = Node::empty(curr.aabc.expand_towards(new_leaf.pos));
-                    n.add_child(Child::Node(curr));
+            _ => (),
+        }
+
+        let root = std::mem::replace(&mut self.root, None);
+        match root {
+            None => self.root = Some(leaf),
+            Some(node) => {
+                let expanded = node.aabc.expand_towards(leaf.aabc.origin);
+                let mut curr = Node::empty(expanded.origin, expanded.size);
+                curr.add_child(node);
+                while !curr.aabc.contains(leaf.aabc.origin) {
+                    let expanded = curr.aabc.expand_towards(leaf.aabc.origin);
+                    let mut n = Node::empty(expanded.origin, expanded.size);
+                    n.add_child(curr);
                     curr = n;
                 }
-                Self::add_down(&mut curr, new_leaf);
-                self.root = Child::Node(curr);
-            }
-            Child::Node(_) => {
-                /*
-                The root of the tree pointed to a node. Insert the new leaf into the node structure, creating new nodes if necessary.
-                */
-                panic!("")
+                Self::add_down(&mut curr, leaf);
+                self.root = Some(curr);
             }
         }
     }
@@ -153,149 +158,104 @@ impl<T: Copy> Octree<T> {
 mod tests {
     use crate::{aabc::Aabc, octree::Node};
 
-    use super::{Child, Leaf, Octree};
+    use super::*;
 
     #[test]
     fn insert_leaf() {
         let mut tree = Octree::new();
-        let expected_leaf = Leaf {
-            pos: [0, 0, 0],
-            data: 0,
-        };
-        tree.insert_leaf(expected_leaf);
-        assert_eq!(tree.root, Child::Leaf(expected_leaf))
+        let expected_leaf = Node::new_leaf(0, [0, 0, 0]);
+        tree.insert_leaf(expected_leaf.clone());
+        assert_eq!(tree.root, Some(expected_leaf))
+    }
+
+    #[test]
+    #[should_panic]
+    fn insert_fake_leaf_panics() {
+        let mut tree: Octree<i32> = Octree::new();
+        let expected_leaf = Box::new(Node {
+            data: NodeData::Children([None, None, None, None, None, None, None, None]),
+            aabc: Aabc {
+                origin: [0, 0, 0],
+                size: 1,
+            },
+        });
+        tree.insert_leaf(expected_leaf.clone());
+        assert_eq!(tree.root, Some(expected_leaf))
+    }
+
+    #[test]
+    #[should_panic]
+    fn insert_large_leaf_panics() {
+        let mut tree: Octree<i32> = Octree::new();
+        let expected_leaf = Box::new(Node {
+            data: NodeData::Value(2),
+            aabc: Aabc {
+                origin: [0, 0, 0],
+                size: 2,
+            },
+        });
+        tree.insert_leaf(expected_leaf.clone());
+        assert_eq!(tree.root, Some(expected_leaf))
     }
 
     #[test]
     #[should_panic]
     fn insert_duplicate_leaf_panics() {
         let mut tree = Octree::new();
-        tree.insert_leaf(Leaf {
-            pos: [0, 0, 0],
-            data: 0,
-        });
-        tree.insert_leaf(Leaf {
-            pos: [0, 0, 0],
-            data: 0,
-        });
+        tree.insert_leaf(Node::new_leaf(0, [0, 0, 0]));
+        tree.insert_leaf(Node::new_leaf(0, [0, 0, 0]));
     }
 
     #[test]
     #[should_panic]
     fn add_child_leaf_outside_node_panics() {
-        let mut node = Node::empty(Aabc {
-            origin: [0, 0, 0],
-            size: 2,
-        });
-        node.add_child(Child::Leaf(Leaf {
-            pos: [2, 2, 2],
-            data: 0,
-        }));
+        let mut node = Node::empty([0, 0, 0], 2);
+        node.add_child(Node::new_leaf(0, [2, 2, 2]));
     }
 
     #[test]
     #[should_panic]
     fn add_child_leaf_to_large_node_panics() {
-        let mut node = Node::empty(Aabc {
-            origin: [0, 0, 0],
-            size: 4,
-        });
-        node.add_child(Child::Leaf(Leaf {
-            pos: [0, 0, 0],
-            data: 0,
-        }));
+        let mut node = Node::empty([0, 0, 0], 4);
+        node.add_child(Node::new_leaf(0, [0, 0, 0]));
     }
 
     #[test]
     #[should_panic]
     fn add_child_node_to_incompatibly_sized_node_panics() {
-        let mut node: Box<Node<i32>> = Node::empty(Aabc {
-            origin: [0, 0, 0],
-            size: 8,
-        });
-        node.add_child(Child::Node(Node::empty(Aabc {
-            origin: [0, 0, 0],
-            size: 2,
-        })));
+        let mut node: Box<Node<i32>> = Node::empty([0, 0, 0], 8);
+        node.add_child(Node::empty([0, 0, 0], 2));
     }
 
     #[test]
     #[should_panic]
     fn add_child_node_outside_node_panics() {
-        let mut node: Box<Node<i32>> = Node::empty(Aabc {
-            origin: [0, 0, 0],
-            size: 4,
-        });
-        node.add_child(Child::Node(Node::empty(Aabc {
-            origin: [4, 4, 4],
-            size: 2,
-        })));
-    }
-
-    #[test]
-    #[should_panic]
-    fn add_none_child_to_node_panics() {
-        let mut node: Box<Node<i32>> = Node::empty(Aabc {
-            origin: [0, 0, 0],
-            size: 4,
-        });
-        node.add_child(Child::None);
+        let mut node: Box<Node<i32>> = Node::empty([0, 0, 0], 4);
+        node.add_child(Node::empty([4, 4, 4], 2));
     }
 
     #[test]
     fn add_children_leaves_to_node() {
-        let mut node: Box<Node<i32>> = Node::empty(Aabc {
-            origin: [0, 0, 0],
-            size: 2,
-        });
+        let mut node: Box<Node<i32>> = Node::empty([0, 0, 0], 2);
         let expected_children = [
-            Leaf {
-                pos: [1, 1, 1],
-                data: 0,
-            },
-            Leaf {
-                pos: [0, 1, 1],
-                data: 0,
-            },
-            Leaf {
-                pos: [0, 0, 1],
-                data: 0,
-            },
-            Leaf {
-                pos: [1, 0, 1],
-                data: 0,
-            },
-            Leaf {
-                pos: [1, 1, 0],
-                data: 0,
-            },
-            Leaf {
-                pos: [0, 1, 0],
-                data: 0,
-            },
-            Leaf {
-                pos: [0, 0, 0],
-                data: 0,
-            },
-            Leaf {
-                pos: [1, 0, 0],
-                data: 0,
-            },
+            Some(Node::new_leaf(0, [1, 1, 1])),
+            Some(Node::new_leaf(0, [0, 1, 1])),
+            Some(Node::new_leaf(0, [0, 0, 1])),
+            Some(Node::new_leaf(0, [1, 0, 1])),
+            Some(Node::new_leaf(0, [1, 1, 0])),
+            Some(Node::new_leaf(0, [0, 1, 0])),
+            Some(Node::new_leaf(0, [0, 0, 0])),
+            Some(Node::new_leaf(0, [1, 0, 0])),
         ];
         for i in 0..expected_children.len() {
-            node.add_child(Child::Leaf(expected_children[i]));
+            node.add_child(expected_children[i].clone().unwrap());
         }
-        for i in 0..expected_children.len() {
-            assert_eq!(Child::Leaf(expected_children[i]), node.children[i])
-        }
+        assert_eq!(NodeData::Children(expected_children), node.data)
     }
 
     #[test]
     fn add_children_nodes_to_node() {
-        let mut node: Box<Node<i32>> = Node::empty(Aabc {
-            origin: [0, 0, 0],
-            size: 4,
-        });
+        let mut node: Box<Node<i32>> = Node::empty([0, 0, 0], 4);
         let expected_aabcs = [
             Aabc {
                 origin: [2, 2, 2],
@@ -331,40 +291,29 @@ mod tests {
             },
         ];
         for i in 0..expected_aabcs.len() {
-            node.add_child(Child::Node(Node::empty(expected_aabcs[i])));
+            node.add_child(Node::empty(expected_aabcs[i].origin, 2));
         }
-        for i in 0..expected_aabcs.len() {
-            assert_eq!(
-                Child::Node(Node::empty(expected_aabcs[i])),
-                node.children[i]
-            )
+        match node.data {
+            NodeData::Children(arr) => {
+                for i in 0..expected_aabcs.len() {
+                    assert_eq!(expected_aabcs[i], arr[i].clone().unwrap().aabc)
+                }
+            }
+            NodeData::Value(_) => assert!(false, "node was a leaf somehow"),
         }
     }
 
     #[test]
     fn insert_two_leaves() {
         let mut tree = Octree::new();
-        let leaf1 = Leaf {
-            pos: [0, 0, 0],
-            data: 0,
-        };
-        let leaf2 = Leaf {
-            pos: [1, 0, 0],
-            data: 1,
-        };
-        tree.insert_leaf(leaf1);
-        tree.insert_leaf(leaf2);
-        let mut expected_node = Node::empty(Aabc {
-            origin: [0, 0, 0],
-            size: 2,
-        });
-        expected_node.children[6] = Child::Leaf(leaf1);
-        expected_node.children[7] = Child::Leaf(leaf2);
-        match tree.root {
-            Child::Node(actual_node) => {
-                assert_eq!(actual_node, expected_node);
-            }
-            _ => assert!(false, "root was {:?}", tree.root),
-        };
+        let leaf1 = Node::new_leaf(0, [0, 0, 0]);
+        let leaf2 = Node::new_leaf(1, [1, 0, 0]);
+        tree.insert_leaf(leaf1.clone());
+        tree.insert_leaf(leaf2.clone());
+        let mut expected_node = Node::empty([0, 0, 0], 2);
+        expected_node.data =
+            NodeData::Children([None, None, None, None, None, None, Some(leaf1), Some(leaf2)]);
+
+        assert_eq!(tree.root, Some(expected_node));
     }
 }
