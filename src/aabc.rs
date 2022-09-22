@@ -16,6 +16,17 @@ impl Aabc {
         true
     }
 
+    pub fn contains_aabc(&self, aabc: Aabc) -> bool {
+        for i in 0..3 {
+            if aabc.origin[i] < self.origin[i]
+                || aabc.origin[i] + aabc.size as i32 > self.origin[i] + self.size as i32
+            {
+                return false;
+            }
+        }
+        true
+    }
+
     pub fn expand_towards(&self, target: Vector3<i32>) -> Aabc {
         if self.contains(target) {
             panic!(
@@ -158,5 +169,66 @@ mod tests {
         };
         let result = aabc.shrink_towards([1, 1, 1]);
         assert_eq!(expect, result)
+    }
+
+    #[test]
+    fn contains_aabc_self() {
+        let aabc = Aabc {
+            origin: [0, 0, 0],
+            size: 4,
+        };
+        assert!(aabc.contains_aabc(aabc))
+    }
+
+    #[test]
+    fn does_not_contain_aabc() {
+        let aabc = Aabc {
+            origin: [0, 0, 0],
+            size: 4,
+        };
+        let target = Aabc {
+            origin: [2, 2, 2],
+            size: 4,
+        };
+        assert!(!aabc.contains_aabc(target))
+    }
+
+    #[test]
+    fn contains_aabc_enclosed() {
+        let aabc = Aabc {
+            origin: [0, 0, 0],
+            size: 4,
+        };
+        let target = Aabc {
+            origin: [1, 1, 1],
+            size: 2,
+        };
+        assert!(aabc.contains_aabc(target))
+    }
+
+    #[test]
+    fn contains_aabc_min() {
+        let aabc = Aabc {
+            origin: [0, 0, 0],
+            size: 4,
+        };
+        let target = Aabc {
+            origin: [0, 0, 0],
+            size: 2,
+        };
+        assert!(aabc.contains_aabc(target))
+    }
+
+    #[test]
+    fn contains_aabc_max() {
+        let aabc = Aabc {
+            origin: [0, 0, 0],
+            size: 4,
+        };
+        let target = Aabc {
+            origin: [2, 2, 2],
+            size: 2,
+        };
+        assert!(aabc.contains_aabc(target))
     }
 }
