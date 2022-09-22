@@ -137,18 +137,25 @@ impl<T: Copy> Octree<T> {
         let root = std::mem::replace(&mut self.root, None);
         match root {
             None => self.root = Some(leaf),
-            Some(node) => {
-                let expanded = node.aabc.expand_towards(leaf.aabc.origin);
-                let mut curr = Node::empty(expanded.origin, expanded.size);
-                curr.add_child(node);
-                while !curr.aabc.contains(leaf.aabc.origin) {
-                    let expanded = curr.aabc.expand_towards(leaf.aabc.origin);
-                    let mut n = Node::empty(expanded.origin, expanded.size);
-                    n.add_child(curr);
-                    curr = n;
+            Some(mut node) => {
+                if node.aabc.contains(leaf.aabc.origin) {
+                    match node.data {
+                        NodeData::Value(_) => panic!("tried to replace leaf"),
+                        NodeData::Children(ref children) => {
+                            if children[node.get_child_idx(&leaf)].is_some() {
+                                panic!("tried to replace leaf")
+                            }
+                        }
+                    }
                 }
-                Self::add_down(&mut curr, leaf);
-                self.root = Some(curr);
+                while !node.aabc.contains(leaf.aabc.origin) {
+                    let expanded = node.aabc.expand_towards(leaf.aabc.origin);
+                    let mut n = Node::empty(expanded.origin, expanded.size);
+                    n.add_child(node);
+                    node = n;
+                }
+                Self::add_down(&mut node, leaf);
+                self.root = Some(node);
             }
         }
     }
@@ -208,21 +215,21 @@ mod tests {
 
     #[test]
     #[should_panic]
-    fn add_child_leaf_outside_node_panics() {
+    fn add_leaf_outside_node_panics() {
         let mut node = Node::empty([0, 0, 0], 2);
         node.add_child(Node::new_leaf(0, [2, 2, 2]));
     }
 
     #[test]
     #[should_panic]
-    fn add_child_leaf_to_large_node_panics() {
+    fn add_leaf_to_large_node_panics() {
         let mut node = Node::empty([0, 0, 0], 4);
         node.add_child(Node::new_leaf(0, [0, 0, 0]));
     }
 
     #[test]
     #[should_panic]
-    fn add_child_node_to_incompatibly_sized_node_panics() {
+    fn add_missized_child_panics() {
         let mut node: Box<Node<i32>> = Node::empty([0, 0, 0], 8);
         node.add_child(Node::empty([0, 0, 0], 2));
     }
@@ -236,7 +243,7 @@ mod tests {
 
     #[test]
     fn add_children_leaves_to_node() {
-        let mut node: Box<Node<i32>> = Node::empty([0, 0, 0], 2);
+        let mut node = Node::empty([0, 0, 0], 2);
         let expected_children = [
             Some(Node::new_leaf(0, [1, 1, 1])),
             Some(Node::new_leaf(0, [0, 1, 1])),
@@ -254,7 +261,7 @@ mod tests {
     }
 
     #[test]
-    fn add_children_nodes_to_node() {
+    fn add_child_nodes_to_node() {
         let mut node: Box<Node<i32>> = Node::empty([0, 0, 0], 4);
         let expected_aabcs = [
             Aabc {
