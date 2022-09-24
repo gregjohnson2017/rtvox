@@ -60,68 +60,43 @@ impl<T: Copy> Node<T> {
         })
     }
 
-    fn get_child_idx(&self, child: &Box<Node<T>>) -> usize {
-        let min = self.aabc.origin;
-        let p = child.aabc.origin;
-        let off = child.aabc.size as i32;
-        if p == [min[0], min[1], min[2]] {
-            return 6;
-        } else if p == [min[0] + off, min[1], min[2]] {
-            return 7;
-        } else if p == [min[0], min[1] + off, min[2]] {
-            return 5;
-        } else if p == [min[0] + off, min[1] + off, min[2]] {
-            return 4;
-        } else if p == [min[0], min[1], min[2] + off] {
-            return 2;
-        } else if p == [min[0] + off, min[1], min[2] + off] {
-            return 3;
-        } else if p == [min[0], min[1] + off, min[2] + off] {
-            return 1;
-        } else if p == [min[0] + off, min[1] + off, min[2] + off] {
-            return 0;
-        } else {
-            panic!("child misaligned");
-        }
-    }
-
-    fn octant_contains(&self, offs: [bool; 3], target_aabc: Aabc) -> bool {
-        let half = (self.aabc.size / 2) as i32;
-        let mut off = [0, 0, 0];
-        for i in 0..3 {
-            if offs[i] {
-                off[i] = half;
-            }
-        }
-        let octant = Aabc {
-            origin: vec3_add(self.aabc.origin, off),
-            size: self.aabc.size / 2,
-        };
-        return octant.contains_aabc(target_aabc);
-    }
-
     fn get_octant_idx(&self, target: Aabc) -> usize {
-        if self.octant_contains([false, false, false], target) {
+        fn octant_contains(offs: [bool; 3], target: Aabc, parent: Aabc) -> bool {
+            let half = (parent.size / 2) as i32;
+            let mut off = [0, 0, 0];
+            for i in 0..3 {
+                if offs[i] {
+                    off[i] = half;
+                }
+            }
+            let octant = Aabc {
+                origin: vec3_add(parent.origin, off),
+                size: parent.size / 2,
+            };
+            return octant.contains_aabc(target);
+        }
+        if octant_contains([false, false, false], target, self.aabc) {
             return 6;
-        } else if self.octant_contains([true, false, false], target) {
+        } else if octant_contains([true, false, false], target, self.aabc) {
             return 7;
-        } else if self.octant_contains([false, true, false], target) {
+        } else if octant_contains([false, true, false], target, self.aabc) {
             return 5;
-        } else if self.octant_contains([true, true, false], target) {
+        } else if octant_contains([true, true, false], target, self.aabc) {
             return 4;
-        } else if self.octant_contains([false, false, true], target) {
+        } else if octant_contains([false, false, true], target, self.aabc) {
             return 2;
-        } else if self.octant_contains([true, false, true], target) {
+        } else if octant_contains([true, false, true], target, self.aabc) {
             return 3;
-        } else if self.octant_contains([false, true, true], target) {
+        } else if octant_contains([false, true, true], target, self.aabc) {
             return 1;
-        } else if self.octant_contains([true, true, true], target) {
+        } else if octant_contains([true, true, true], target, self.aabc) {
             return 0;
         } else {
             panic!("target not contained within any octant");
         }
     }
 
+    // returns the number of children, and if there was only 1, its index
     fn count_children(&self) -> (u32, Option<usize>) {
         let mut idx = None;
         let mut assigned = false;
@@ -145,41 +120,41 @@ impl<T: Copy> Node<T> {
         }
     }
 
-    fn remove_child(&mut self, leaf: Box<Node<T>>) -> bool {
-        let idx = self.get_octant_idx(leaf.aabc);
+    fn remove_child(&mut self, child: Box<Node<T>>) -> bool {
+        let idx = self.get_octant_idx(child.aabc);
         match &mut self.data {
             NodeData::Children(ref mut children) => match children[idx] {
-                Some(ref mut node) if node.aabc == leaf.aabc => {
+                Some(ref mut node) if node.aabc == child.aabc => {
                     children[idx] = None;
                     self.count_children().0 == 0
                 }
                 Some(ref mut node) => {
-                    let remove_node = node.remove_child(leaf);
+                    let remove_node = node.remove_child(child);
                     if remove_node {
                         children[idx] = None;
                     }
                     self.count_children().0 == 0
                 }
-                None => panic!("leaf not found"),
+                None => panic!("child not found"),
             },
             NodeData::Value(_) => panic!("????"),
         }
     }
 
-    fn add_down(&mut self, target: Box<Node<T>>) {
+    fn add_down(&mut self, target_leaf: Box<Node<T>>) {
         if self.aabc.size > 2 {
-            let shrunken = self.aabc.shrink_towards(target.aabc.origin);
+            let shrunken = self.aabc.shrink_towards(target_leaf.aabc.origin);
             let n = Node::empty(shrunken.origin, shrunken.size);
             let idx = self.add_child(n);
             match &mut self.data {
                 NodeData::Children(ref mut children) => match children[idx] {
-                    Some(ref mut child) => Self::add_down(child, target),
+                    Some(ref mut child) => Self::add_down(child, target_leaf),
                     None => unreachable!(),
                 },
                 NodeData::Value(_) => unreachable!(),
             }
         } else {
-            self.add_child(target);
+            self.add_child(target_leaf);
         }
     }
 
@@ -190,7 +165,7 @@ impl<T: Copy> Node<T> {
         if self.aabc.size != child.aabc.size * 2 {
             panic!("parent not twice as big as child");
         }
-        let idx = self.get_child_idx(&child);
+        let idx = self.get_octant_idx(child.aabc);
         match self.data {
             NodeData::Children(ref mut children) => {
                 if children[idx].is_some() {
@@ -245,15 +220,8 @@ impl<T: Copy> Octree<T> {
         }
     }
 
-    pub fn insert_leaf(&mut self, leaf: Box<Node<T>>) {
-        match leaf.data {
-            NodeData::Children(_) => panic!("leaf had children"),
-            NodeData::Value(_) if leaf.aabc.size != 1 => {
-                panic!("leaf was not size 1")
-            }
-            _ => (),
-        }
-
+    pub fn insert_leaf(&mut self, data: T, pos: Vector3<i32>) {
+        let leaf = Node::new_leaf(data, pos);
         let root = std::mem::replace(&mut self.root, None);
         match root {
             None => self.root = Some(leaf),
@@ -280,56 +248,26 @@ mod tests {
     #[test]
     fn insert_leaf() {
         let mut tree = Octree::new();
-        let expected_leaf = Node::new_leaf(0, [0, 0, 0]);
-        tree.insert_leaf(expected_leaf.clone());
-        assert_eq!(tree.root, Some(expected_leaf))
-    }
-
-    #[test]
-    #[should_panic]
-    fn insert_fake_leaf_panics() {
-        let mut tree: Octree<i32> = Octree::new();
-        let expected_leaf = Box::new(Node {
-            data: NodeData::Children([None, None, None, None, None, None, None, None]),
-            aabc: Aabc {
-                origin: [0, 0, 0],
-                size: 1,
-            },
-        });
-        tree.insert_leaf(expected_leaf.clone());
-        assert_eq!(tree.root, Some(expected_leaf))
-    }
-
-    #[test]
-    #[should_panic]
-    fn insert_large_leaf_panics() {
-        let mut tree: Octree<i32> = Octree::new();
-        let expected_leaf = Box::new(Node {
-            data: NodeData::Value(2),
-            aabc: Aabc {
-                origin: [0, 0, 0],
-                size: 2,
-            },
-        });
-        tree.insert_leaf(expected_leaf.clone());
-        assert_eq!(tree.root, Some(expected_leaf))
+        let expected_root = Node::new_leaf(0, [0, 0, 0]);
+        tree.insert_leaf(0, [0, 0, 0]);
+        assert_eq!(tree.root, Some(expected_root))
     }
 
     #[test]
     #[should_panic]
     fn insert_duplicate_leaf_panics() {
         let mut tree = Octree::new();
-        tree.insert_leaf(Node::new_leaf(0, [0, 0, 0]));
-        tree.insert_leaf(Node::new_leaf(0, [0, 0, 0]));
+        tree.insert_leaf(0, [0, 0, 0]);
+        tree.insert_leaf(0, [0, 0, 0]);
     }
 
     #[test]
     #[should_panic]
     fn insert_duplicate_leaf_panics_2() {
         let mut tree = Octree::new();
-        tree.insert_leaf(Node::new_leaf(0, [0, 0, 0]));
-        tree.insert_leaf(Node::new_leaf(0, [2, 2, 2]));
-        tree.insert_leaf(Node::new_leaf(0, [0, 0, 0]));
+        tree.insert_leaf(0, [0, 0, 0]);
+        tree.insert_leaf(0, [2, 2, 2]);
+        tree.insert_leaf(0, [0, 0, 0]);
     }
 
     #[test]
@@ -434,8 +372,8 @@ mod tests {
         let mut tree = Octree::new();
         let leaf1 = Node::new_leaf(0, [0, 0, 0]);
         let leaf2 = Node::new_leaf(1, [1, 0, 0]);
-        tree.insert_leaf(leaf1.clone());
-        tree.insert_leaf(leaf2.clone());
+        tree.insert_leaf(0, [0, 0, 0]);
+        tree.insert_leaf(1, [1, 0, 0]);
         let mut expected_node = Node::empty([0, 0, 0], 2);
         expected_node.data =
             NodeData::Children([None, None, None, None, None, None, Some(leaf1), Some(leaf2)]);
@@ -454,29 +392,26 @@ mod tests {
     #[should_panic]
     fn remove_unknown_leaf_panics() {
         let mut tree = Octree::new();
-        tree.insert_leaf(Node::new_leaf(0, [0, 0, 0]));
-        tree.insert_leaf(Node::new_leaf(0, [1, 0, 0]));
+        tree.insert_leaf(0, [0, 0, 0]);
+        tree.insert_leaf(0, [1, 0, 0]);
         tree.remove_leaf(Node::new_leaf(0, [1, 1, 1]));
     }
 
     #[test]
     fn insert_and_remove_leaf() {
         let mut tree = Octree::new();
-        let leaf = Node::new_leaf(0, [0, 0, 0]);
-        tree.insert_leaf(leaf.clone());
-        tree.remove_leaf(leaf);
+        tree.insert_leaf(0, [0, 0, 0]);
+        tree.remove_leaf(Node::new_leaf(0, [0, 0, 0]));
         assert!(tree.root.is_none());
     }
 
     #[test]
     fn insert_2_and_remove_1_leaf() {
         let mut tree = Octree::new();
-        let leaf1 = Node::new_leaf(0, [0, 0, 0]);
-        let leaf2 = Node::new_leaf(0, [1, 1, 1]);
-        tree.insert_leaf(leaf1.clone());
-        tree.insert_leaf(leaf2.clone());
-        tree.remove_leaf(leaf1);
-        assert_eq!(tree.root, Some(leaf2));
+        tree.insert_leaf(0, [0, 0, 0]);
+        tree.insert_leaf(0, [1, 1, 1]);
+        tree.remove_leaf(Node::new_leaf(0, [0, 0, 0]));
+        assert_eq!(tree.root, Some(Node::new_leaf(0, [1, 1, 1])));
     }
 
     #[test]
@@ -485,12 +420,12 @@ mod tests {
         let leaf1 = Node::new_leaf(0, [0, 0, 0]);
         let leaf2 = Node::new_leaf(0, [1, 1, 1]);
         let leaf3 = Node::new_leaf(0, [2, 2, 2]);
-        tree.insert_leaf(leaf1.clone());
-        tree.insert_leaf(leaf2.clone());
-        tree.insert_leaf(leaf3.clone());
+        tree.insert_leaf(0, [0, 0, 0]);
+        tree.insert_leaf(0, [1, 1, 1]);
+        tree.insert_leaf(0, [2, 2, 2]);
         tree.remove_leaf(leaf1);
         let leaf4 = Node::new_leaf(5, [1, 2, 2]);
-        tree.insert_leaf(leaf4.clone());
+        tree.insert_leaf(5, [1, 2, 2]);
         tree.remove_leaf(leaf2);
 
         let expected_root = Box::new(Node {
