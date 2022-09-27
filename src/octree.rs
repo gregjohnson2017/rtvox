@@ -3,6 +3,7 @@ use vecmath::{vec3_add, Vector3};
 use crate::aabc::Aabc;
 
 pub struct Octree<T: Copy> {
+    n_leaves: u32,
     root: Option<Box<Node<T>>>,
 }
 
@@ -181,7 +182,14 @@ impl<T: Copy> Node<T> {
 
 impl<T: Copy> Octree<T> {
     pub fn new() -> Self {
-        Octree { root: None }
+        Octree {
+            n_leaves: 0,
+            root: None,
+        }
+    }
+
+    pub fn count_leaves(&self) -> u32 {
+        return self.n_leaves;
     }
 
     fn shrink_root(&mut self) {
@@ -203,6 +211,7 @@ impl<T: Copy> Octree<T> {
     }
 
     pub fn remove_leaf(&mut self, target: Vector3<i32>) {
+        self.n_leaves -= 1;
         match self.root {
             None => panic!("cannot remove from empty tree"),
             Some(ref mut node) => {
@@ -222,6 +231,7 @@ impl<T: Copy> Octree<T> {
     }
 
     pub fn insert_leaf(&mut self, data: T, pos: Vector3<i32>) {
+        self.n_leaves += 1;
         let leaf = Node::new_leaf(data, pos);
         let root = std::mem::replace(&mut self.root, None);
         match root {
@@ -476,5 +486,37 @@ mod tests {
             },
         });
         assert_eq!(tree.root, Some(expected_root));
+    }
+
+    #[test]
+    fn count_leaves_empty_tree() {
+        let tree: Octree<bool> = Octree::new();
+        let expected_count = 0;
+        assert_eq!(expected_count, tree.count_leaves());
+    }
+
+    #[test]
+    fn count_inserted_leaves() {
+        let mut tree = Octree::new();
+        let leaf1 = Node::new_leaf(0, [0, 0, 0]);
+        let leaf2 = Node::new_leaf(1, [1, 0, 0]);
+        let leaf3 = Node::new_leaf(2, [1, 1, 0]);
+        tree.insert_leaf(0, leaf1.aabc.origin);
+        tree.insert_leaf(0, leaf2.aabc.origin);
+        tree.insert_leaf(0, leaf3.aabc.origin);
+        let expected_count = 3;
+        assert_eq!(expected_count, tree.count_leaves());
+    }
+
+    #[test]
+    fn count_insert_remove() {
+        let mut tree = Octree::new();
+        let leaf1 = Node::new_leaf(0, [0, 0, 0]);
+        let leaf2 = Node::new_leaf(1, [1, 0, 0]);
+        tree.insert_leaf(0, leaf1.aabc.origin);
+        tree.insert_leaf(0, leaf2.aabc.origin);
+        tree.remove_leaf(leaf2.aabc.origin);
+        let expected_count = 1;
+        assert_eq!(expected_count, tree.count_leaves());
     }
 }
