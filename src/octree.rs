@@ -120,16 +120,16 @@ impl<T: Copy> Node<T> {
         }
     }
 
-    fn remove_child(&mut self, child: Box<Node<T>>) -> bool {
-        let idx = self.get_octant_idx(child.aabc);
+    fn remove_child(&mut self, target: Aabc) -> bool {
+        let idx = self.get_octant_idx(target);
         match &mut self.data {
             NodeData::Children(ref mut children) => match children[idx] {
-                Some(ref mut node) if node.aabc == child.aabc => {
+                Some(ref mut node) if node.aabc == target => {
                     children[idx] = None;
                     self.count_children().0 == 0
                 }
                 Some(ref mut node) => {
-                    let remove_node = node.remove_child(child);
+                    let remove_node = node.remove_child(target);
                     if remove_node {
                         children[idx] = None;
                     }
@@ -202,14 +202,15 @@ impl<T: Copy> Octree<T> {
         }
     }
 
-    pub fn remove_leaf(&mut self, leaf: Box<Node<T>>) {
+    pub fn remove_leaf(&mut self, target: Vector3<i32>) {
         match self.root {
             None => panic!("cannot remove from empty tree"),
             Some(ref mut node) => {
-                if node.aabc == leaf.aabc {
+                let target = Aabc::new(target, 1);
+                if node.aabc == target {
                     self.root = None
                 } else {
-                    let remove_node = node.remove_child(leaf);
+                    let remove_node = node.remove_child(target);
                     if remove_node {
                         self.root = None
                     } else {
@@ -384,8 +385,8 @@ mod tests {
     #[test]
     #[should_panic]
     fn remove_leaf_empty_tree_panics() {
-        let mut tree = Octree::new();
-        tree.remove_leaf(Node::new_leaf(0, [0, 0, 0]));
+        let mut tree: Octree<i32> = Octree::new();
+        tree.remove_leaf([0, 0, 0]);
     }
 
     #[test]
@@ -394,14 +395,14 @@ mod tests {
         let mut tree = Octree::new();
         tree.insert_leaf(0, [0, 0, 0]);
         tree.insert_leaf(0, [1, 0, 0]);
-        tree.remove_leaf(Node::new_leaf(0, [1, 1, 1]));
+        tree.remove_leaf([1, 1, 1]);
     }
 
     #[test]
     fn insert_and_remove_leaf() {
         let mut tree = Octree::new();
         tree.insert_leaf(0, [0, 0, 0]);
-        tree.remove_leaf(Node::new_leaf(0, [0, 0, 0]));
+        tree.remove_leaf([0, 0, 0]);
         assert!(tree.root.is_none());
     }
 
@@ -410,15 +411,15 @@ mod tests {
         let mut tree = Octree::new();
         tree.insert_leaf(0, [0, 0, 0]);
         tree.insert_leaf(0, [1, 1, 1]);
-        tree.remove_leaf(Node::new_leaf(0, [0, 0, 0]));
+        tree.remove_leaf([0, 0, 0]);
         assert_eq!(tree.root, Some(Node::new_leaf(0, [1, 1, 1])));
     }
 
     #[test]
     fn complex_insert_remove() {
         let mut tree = Octree::new();
-        let leaf1 = Node::new_leaf(0, [0, 0, 0]);
-        let leaf2 = Node::new_leaf(0, [1, 1, 1]);
+        let leaf1 = [0; 3];
+        let leaf2 = [1; 3];
         let leaf3 = Node::new_leaf(0, [2, 2, 2]);
         tree.insert_leaf(0, [0, 0, 0]);
         tree.insert_leaf(0, [1, 1, 1]);

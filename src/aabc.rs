@@ -7,6 +7,10 @@ pub struct Aabc {
 }
 
 impl Aabc {
+    pub fn new(origin: Vector3<i32>, size: u32) -> Self {
+        Aabc { origin, size }
+    }
+
     pub fn contains(&self, p: Vector3<i32>) -> bool {
         for i in 0..3 {
             if p[i] < self.origin[i] || p[i] >= self.origin[i] + self.size as i32 {
