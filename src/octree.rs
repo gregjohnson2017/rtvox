@@ -242,7 +242,7 @@ impl<T: Copy + Into<i32>> Octree<T> {
                 }
                 start - idx
             }
-            NodeData::Value(_) => unreachable!(),
+            NodeData::Value(_) => panic!("single leaf tree not supported"),
         }
     }
 
