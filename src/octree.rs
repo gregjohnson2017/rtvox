@@ -218,20 +218,31 @@ impl<T: Copy + Into<i32>> Octree<T> {
     fn serialize_recurse(idx: usize, arr: &mut Vec<i32>, curr: &Box<Node<T>>) -> usize {
         match &curr.data {
             NodeData::Children(children) => {
-                for i in 0..children.len() {
-                    match &children[i] {
-                        Some(c) => {
-                            Self::serialize_recurse(idx, arr, curr)
-                            // arr[idx + i] =
+                let mut start = idx + 8;
+                if curr.aabc.size == 2 {
+                    for i in 0..children.len() {
+                        match &children[i] {
+                            Some(c) => match c.data {
+                                NodeData::Children(_) => unreachable!(),
+                                NodeData::Value(d) => arr[idx + i] = d.clone().into(),
+                            },
+                            None => (),
                         }
-                        None => (),
+                    }
+                } else {
+                    for i in 0..children.len() {
+                        match &children[i] {
+                            Some(c) => {
+                                arr[idx + i] = start as i32;
+                                start += Self::serialize_recurse(start, arr, c)
+                            }
+                            None => (),
+                        }
                     }
                 }
+                start - idx
             }
-            NodeData::Value(d) => {
-                arr[idx] = d.clone().into();
-                0
-            }
+            NodeData::Value(_) => unreachable!(),
         }
     }
 
