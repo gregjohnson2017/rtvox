@@ -2,24 +2,24 @@ use vecmath::{vec3_add, Vector3};
 
 use crate::aabc::Aabc;
 
-pub struct Octree<T: Copy> {
+pub struct Octree<T: Copy + Into<i32>> {
     n_leaves: u32,
     root: Option<Box<Node<T>>>,
 }
 
 #[derive(PartialEq, Debug)]
-struct Node<T: Copy> {
+struct Node<T: Copy + Into<i32>> {
     data: NodeData<T>,
     aabc: Aabc,
 }
 
 #[derive(PartialEq, Debug)]
-enum NodeData<T: Copy> {
+enum NodeData<T: Copy + Into<i32>> {
     Children([Option<Box<Node<T>>>; 8]),
     Value(T),
 }
 
-impl<T: Copy> Clone for Box<Node<T>> {
+impl<T: Copy + Into<i32>> Clone for Box<Node<T>> {
     fn clone(&self) -> Self {
         match &self.data {
             NodeData::Children(children) => {
@@ -43,7 +43,7 @@ impl<T: Copy> Clone for Box<Node<T>> {
     }
 }
 
-impl<T: Copy> Node<T> {
+impl<T: Copy + Into<i32>> Node<T> {
     fn empty(origin: Vector3<i32>, size: u32) -> Box<Node<T>> {
         Box::new(Node {
             data: NodeData::Children([None, None, None, None, None, None, None, None]),
@@ -180,7 +180,7 @@ impl<T: Copy> Node<T> {
     }
 }
 
-impl<T: Copy> Octree<T> {
+impl<T: Copy + Into<i32>> Octree<T> {
     pub fn new() -> Self {
         Octree {
             n_leaves: 0,
@@ -188,8 +188,66 @@ impl<T: Copy> Octree<T> {
         }
     }
 
+    fn get_size_recurse(node: &Box<Node<T>>) -> usize {
+        match &node.data {
+            NodeData::Children(children) => {
+                let mut count = 8;
+                for child in children {
+                    match child {
+                        Some(ref c) => count += Self::get_size_recurse(c),
+                        None => (),
+                    }
+                }
+                count
+            }
+            NodeData::Value(_) => 0,
+        }
+    }
+
+    fn get_serialized_size(&self) -> usize {
+        match &self.root {
+            Some(r) => 4 + Self::get_size_recurse(r),
+            None => 1,
+        }
+    }
+
     pub fn count_leaves(&self) -> u32 {
-        return self.n_leaves;
+        self.n_leaves
+    }
+
+    fn serialize_recurse(idx: usize, arr: &mut Vec<i32>, curr: &Box<Node<T>>) -> usize {
+        match &curr.data {
+            NodeData::Children(children) => {
+                for i in 0..children.len() {
+                    match &children[i] {
+                        Some(c) => {
+                            Self::serialize_recurse(idx, arr, curr)
+                            // arr[idx + i] =
+                        }
+                        None => (),
+                    }
+                }
+            }
+            NodeData::Value(d) => {
+                arr[idx] = d.clone().into();
+                0
+            }
+        }
+    }
+
+    pub fn serialize(&self) -> Vec<i32> {
+        let mut arr = vec![0 as i32; self.get_serialized_size()];
+        match &self.root {
+            Some(n) => {
+                arr[0] = n.aabc.size as i32;
+                arr[1] = n.aabc.origin[0];
+                arr[2] = n.aabc.origin[1];
+                arr[3] = n.aabc.origin[2];
+                Self::serialize_recurse(4, &mut arr, n);
+                arr
+            }
+            None => arr,
+        }
     }
 
     fn shrink_root(&mut self) {
@@ -518,5 +576,93 @@ mod tests {
         tree.remove_leaf(leaf2.aabc.origin);
         let expected_count = 1;
         assert_eq!(expected_count, tree.count_leaves());
+    }
+
+    #[test]
+    fn serialize_empty_tree() {
+        let tree: Octree<bool> = Octree::new();
+        let expected = vec![0];
+        assert_eq!(expected, tree.serialize());
+    }
+
+    #[test]
+    fn serialize_size_2_tree() {
+        let mut tree: Octree<i32> = Octree::new();
+        tree.insert_leaf(1, [0, 0, 0]);
+        tree.insert_leaf(2, [1, 1, 1]);
+
+        let expected = vec![2, 0, 0, 0, 2, 0, 0, 0, 0, 0, 1, 0];
+        assert_eq!(expected, tree.serialize());
+    }
+
+    #[test]
+    fn serialize_size_4_tree() {
+        let mut tree: Octree<i32> = Octree::new();
+        tree.insert_leaf(1, [0, 0, 0]);
+        tree.insert_leaf(2, [1, 1, 1]);
+        tree.insert_leaf(3, [-1, -1, -1]);
+
+        let expected = vec![
+            4, // root size
+            -2, -2, -2, // xyz
+            12, 0, 0, 0, 0, 0, 20, 0, // size 4's children indices
+            2, 0, 0, 0, 0, 0, 1, 0, // size 2's children leaf block type
+            3, 0, 0, 0, 0, 0, 0, 0, // size 2's children leaf block type
+        ];
+        assert_eq!(expected, tree.serialize());
+    }
+
+    #[test]
+    fn serialize_size_8_tree() {
+        let mut tree: Octree<i32> = Octree::new();
+        tree.insert_leaf(1, [0, 0, 0]);
+        tree.insert_leaf(2, [1, 1, 1]);
+        tree.insert_leaf(3, [2, 2, 2]);
+        tree.insert_leaf(4, [4, 4, 4]);
+
+        let expected = vec![
+            8, // root size
+            0, 0, 0, // xyz
+            12, 0, 0, 0, 0, 0, 28, 0, // size 8's children indices
+            0, 0, 0, 0, 0, 0, 20, 0, // size 4's children indices
+            0, 0, 0, 0, 0, 0, 4, 0, // size 2's children leaf block type
+            36, 0, 0, 0, 0, 0, 44, 0, // size 4's children indices
+            0, 0, 0, 0, 0, 0, 3, 0, // size 2's children leaf block type
+            2, 0, 0, 0, 0, 0, 1, 0, // size 2's children leaf block type
+        ];
+        assert_eq!(expected, tree.serialize());
+    }
+
+    #[test]
+    fn get_size_serialize_empty_tree() {
+        let tree: Octree<bool> = Octree::new();
+        assert_eq!(1, tree.get_serialized_size());
+    }
+
+    #[test]
+    fn get_size_serialize_size_2_tree() {
+        let mut tree: Octree<i32> = Octree::new();
+        tree.insert_leaf(1, [0, 0, 0]);
+        tree.insert_leaf(2, [1, 1, 1]);
+        assert_eq!(12, tree.get_serialized_size());
+    }
+
+    #[test]
+    fn get_size_serialize_size_4_tree() {
+        let mut tree: Octree<i32> = Octree::new();
+        tree.insert_leaf(1, [0, 0, 0]);
+        tree.insert_leaf(2, [1, 1, 1]);
+        tree.insert_leaf(3, [-1, -1, -1]);
+        assert_eq!(28, tree.get_serialized_size());
+    }
+
+    #[test]
+    fn get_size_serialize_size_8_tree() {
+        let mut tree: Octree<i32> = Octree::new();
+        tree.insert_leaf(1, [0, 0, 0]);
+        tree.insert_leaf(2, [1, 1, 1]);
+        tree.insert_leaf(3, [2, 2, 2]);
+        tree.insert_leaf(4, [4, 4, 4]);
+        assert_eq!(52, tree.get_serialized_size());
     }
 }
