@@ -27,6 +27,8 @@ use vulkano::{
 
 use winit::window::Window;
 
+use crate::octree::Octree;
+
 use self::cs::ty::CameraInfo;
 
 pub const COMPUTE_GROUP_SIZE: u32 = 8;
@@ -41,6 +43,7 @@ pub struct Graphics {
     compute_pipeline: Arc<ComputePipeline>,
     camera_info: Arc<CpuAccessibleBuffer<cs::ty::CameraInfo>>,
     cube_map_array: Arc<ImageView<StorageImage>>,
+    octree_buffer: Arc<CpuAccessibleBuffer<[i32]>>,
 }
 
 #[derive(Debug)]
@@ -241,6 +244,22 @@ impl Graphics {
         )
         .unwrap();
 
+        let mut tree = Octree::new();
+        tree.insert_leaf(11, [0, 0, -5]);
+        tree.insert_leaf(12, [1, 0, -5]);
+        // println!("{:?}", tree.serialize());
+
+        let octree_buffer = CpuAccessibleBuffer::from_iter(
+            device.clone(),
+            BufferUsage {
+                storage_buffer: true,
+                ..BufferUsage::none()
+            },
+            false,
+            tree.serialize(),
+        )
+        .unwrap();
+
         Ok(Self {
             surface,
             recreate_swapchain: false,
@@ -252,6 +271,7 @@ impl Graphics {
             compute_pipeline,
             camera_info: Self::create_camera_info_buffer(device, camera_info),
             cube_map_array,
+            octree_buffer,
         })
     }
 
@@ -325,6 +345,7 @@ impl Graphics {
                 ),
                 WriteDescriptorSet::buffer(1, self.camera_info.clone()),
                 WriteDescriptorSet::image_view(2, self.cube_map_array.clone()),
+                WriteDescriptorSet::buffer(3, self.octree_buffer.clone()),
             ],
         )
         .unwrap();

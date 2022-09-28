@@ -12,6 +12,10 @@ layout(set = 0, binding = 1) uniform CameraInfo {
 
 layout(set = 0, binding = 2, rgba8) uniform imageCubeArray cubeMapArray;
 
+layout(set = 0, binding = 3) buffer Octree {
+    int data[];
+} tree;
+
 vec3 calculate_ray() {
     float x = float(gl_GlobalInvocationID.x);
     float y = float(gl_GlobalInvocationID.y);
@@ -114,7 +118,7 @@ vec3 hit_aabb(vec3 ray) {
     int face_size = imageSize(cubeMapArray).x;
     vec3 uv = face_size * (coord - minB) / voxelSize;
     vec3 st = face_size - uv;
-    int block_type = 11;
+    int block_type = tree.data[10];
     int base_idx = block_type * 6;
     if (whichPlane == XZ) {
         if (coord[1] > minB.y) {

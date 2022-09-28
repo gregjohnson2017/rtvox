@@ -79,17 +79,17 @@ impl<T: Copy + Into<i32>> Node<T> {
         if octant_contains([false, false, false], target, self.aabc) {
             return 6;
         } else if octant_contains([true, false, false], target, self.aabc) {
-            return 7;
-        } else if octant_contains([false, true, false], target, self.aabc) {
             return 5;
-        } else if octant_contains([true, true, false], target, self.aabc) {
-            return 4;
-        } else if octant_contains([false, false, true], target, self.aabc) {
+        } else if octant_contains([false, true, false], target, self.aabc) {
             return 2;
-        } else if octant_contains([true, false, true], target, self.aabc) {
-            return 3;
-        } else if octant_contains([false, true, true], target, self.aabc) {
+        } else if octant_contains([true, true, false], target, self.aabc) {
             return 1;
+        } else if octant_contains([false, false, true], target, self.aabc) {
+            return 7;
+        } else if octant_contains([true, false, true], target, self.aabc) {
+            return 4;
+        } else if octant_contains([false, true, true], target, self.aabc) {
+            return 3;
         } else if octant_contains([true, true, true], target, self.aabc) {
             return 0;
         } else {
@@ -383,13 +383,13 @@ mod tests {
         let mut node = Node::empty([0, 0, 0], 2);
         let expected_children = [
             Some(Node::new_leaf(0, [1, 1, 1])),
-            Some(Node::new_leaf(0, [0, 1, 1])),
-            Some(Node::new_leaf(0, [0, 0, 1])),
-            Some(Node::new_leaf(0, [1, 0, 1])),
             Some(Node::new_leaf(0, [1, 1, 0])),
             Some(Node::new_leaf(0, [0, 1, 0])),
-            Some(Node::new_leaf(0, [0, 0, 0])),
+            Some(Node::new_leaf(0, [0, 1, 1])),
+            Some(Node::new_leaf(0, [1, 0, 1])),
             Some(Node::new_leaf(0, [1, 0, 0])),
+            Some(Node::new_leaf(0, [0, 0, 0])),
+            Some(Node::new_leaf(0, [0, 0, 1])),
         ];
         for i in 0..expected_children.len() {
             node.add_child(expected_children[i].clone().unwrap());
@@ -406,18 +406,6 @@ mod tests {
                 size: 2,
             },
             Aabc {
-                origin: [0, 2, 2],
-                size: 2,
-            },
-            Aabc {
-                origin: [0, 0, 2],
-                size: 2,
-            },
-            Aabc {
-                origin: [2, 0, 2],
-                size: 2,
-            },
-            Aabc {
                 origin: [2, 2, 0],
                 size: 2,
             },
@@ -426,11 +414,23 @@ mod tests {
                 size: 2,
             },
             Aabc {
-                origin: [0, 0, 0],
+                origin: [0, 2, 2],
+                size: 2,
+            },
+            Aabc {
+                origin: [2, 0, 2],
                 size: 2,
             },
             Aabc {
                 origin: [2, 0, 0],
+                size: 2,
+            },
+            Aabc {
+                origin: [0, 0, 0],
+                size: 2,
+            },
+            Aabc {
+                origin: [0, 0, 2],
                 size: 2,
             },
         ];
@@ -456,7 +456,7 @@ mod tests {
         tree.insert_leaf(1, [1, 0, 0]);
         let mut expected_node = Node::empty([0, 0, 0], 2);
         expected_node.data =
-            NodeData::Children([None, None, None, None, None, None, Some(leaf1), Some(leaf2)]);
+            NodeData::Children([None, None, None, None, None, Some(leaf2), Some(leaf1), None]);
 
         assert_eq!(tree.root, Some(expected_node));
     }
@@ -497,16 +497,14 @@ mod tests {
     #[test]
     fn complex_insert_remove() {
         let mut tree = Octree::new();
-        let leaf1 = [0; 3];
-        let leaf2 = [1; 3];
         let leaf3 = Node::new_leaf(0, [2, 2, 2]);
         tree.insert_leaf(0, [0, 0, 0]);
         tree.insert_leaf(0, [1, 1, 1]);
-        tree.insert_leaf(0, [2, 2, 2]);
-        tree.remove_leaf(leaf1);
-        let leaf4 = Node::new_leaf(5, [1, 2, 2]);
-        tree.insert_leaf(5, [1, 2, 2]);
-        tree.remove_leaf(leaf2);
+        tree.insert_leaf(0, leaf3.aabc.origin);
+        tree.remove_leaf([0, 0, 0]);
+        let leaf4 = Node::new_leaf(5, [2, 2, 1]);
+        tree.insert_leaf(5, leaf4.aabc.origin);
+        tree.remove_leaf([1, 1, 1]);
 
         let expected_root = Box::new(Node {
             data: NodeData::Children([
@@ -538,7 +536,7 @@ mod tests {
                         Some(leaf4),
                     ]),
                     aabc: Aabc {
-                        origin: [0, 2, 2],
+                        origin: [2, 2, 0],
                         size: 2,
                     },
                 })),
@@ -603,6 +601,16 @@ mod tests {
         tree.insert_leaf(2, [1, 1, 1]);
 
         let expected = vec![2, 0, 0, 0, 2, 0, 0, 0, 0, 0, 1, 0];
+        assert_eq!(expected, tree.serialize());
+    }
+
+    #[test]
+    fn serialize_size_2_tree_b() {
+        let mut tree: Octree<i32> = Octree::new();
+        tree.insert_leaf(1, [0, 0, -5]);
+        tree.insert_leaf(2, [1, 0, -5]);
+
+        let expected = vec![2, 0, 0, -5, 0, 0, 0, 0, 0, 2, 1, 0];
         assert_eq!(expected, tree.serialize());
     }
 
