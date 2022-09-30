@@ -1,3 +1,4 @@
+use rand::{self, Rng};
 use std::{io::Cursor, sync::Arc};
 use vulkano::{
     buffer::{BufferUsage, CpuAccessibleBuffer},
@@ -243,11 +244,17 @@ impl Graphics {
             },
         )
         .unwrap();
-
         let mut tree = Octree::new();
-        for i in 0..8 {
-            println!("{:?}", vec!([0 + i, 0 + i, -5 + i]));
-            tree.insert_leaf(9, [0 + i, 0 + i, -5 + i]);
+        for i in -50..50 {
+            for j in -50..50 {
+                for k in -50..50 {
+                    let place_block = rand::thread_rng().gen_range(0..8);
+                    if place_block == 0 {
+                        let block_type = rand::thread_rng().gen_range(1..15);
+                        tree.insert_leaf(block_type, [i, j, k]);
+                    }
+                }
+            }
         }
 
         let octree_buffer = CpuAccessibleBuffer::from_iter(
