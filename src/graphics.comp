@@ -50,12 +50,43 @@ vec3 calculate_ray() {
 #define XZ 1
 #define XY 2
 
-vec3 hit_aabb(vec3 ray) {
+
+struct HitData {
+    int plane;
+    vec3 coord;
+    float dist;
+    bool hit;
+};
+
+vec3 get_child_origin(int idx, vec3 parent_origin, int half_size) {
+    switch (idx) {
+    case 0:
+        return vec3(parent_origin) + half_size;
+    case 1:
+        return vec3(parent_origin) + vec3(half_size, half_size, 0);
+    case 2:
+        return vec3(parent_origin) + vec3(0, half_size, 0);
+    case 3:
+        return vec3(parent_origin) + vec3(0, half_size, half_size);
+    case 4:
+        return vec3(parent_origin) + vec3(half_size, 0, half_size);
+    case 5:
+        return vec3(parent_origin) + vec3(half_size, 0, 0);
+    case 6:
+        return vec3(parent_origin);
+    case 7:
+        return vec3(parent_origin) + vec3(0, 0, half_size);
+    }
+}
+
+float distance_squared(vec3 p1, vec3 p2) {
+    return pow(p2.x - p1.x, 2) + pow(p2.y - p1.y, 2) + pow(p2.z - p1.z, 2);
+}
+
+
+HitData hit_aabc(vec3 ray, vec3 minB, float size) {
     vec3 miss_col = vec3(1.0, 1.0, 1.0);
-    vec3 center = vec3(0.0, 0.0, -5.0);
-    float voxelSize = 1.0;
-    vec3 minB = vec3(-0.5, -0.5, -5.5);
-    vec3 maxB = minB + voxelSize;
+    vec3 maxB = minB + size;
     vec3 origin = uniforms.eye;
     vec3 dir = ray;
     vec3 coord = vec3(0.0, 0.0, 0.0);
@@ -84,7 +115,7 @@ vec3 hit_aabb(vec3 ray) {
 	/* Ray origin inside bounding box */
 	if (inside)	{
 		coord = origin;
-		return vec3(1.0, 1.0, 1.0);
+		return HitData(0, vec3(0), -1.0, true);
 	}
 	/* Calculate T distances to candidate planes */
 	for (int i = 0; i < NUMDIM; i++) {
@@ -102,25 +133,28 @@ vec3 hit_aabb(vec3 ray) {
     }
 	/* Check final candidate actually inside box */
 	if (maxT[whichPlane] < 0.) {
-        return miss_col;
+		return HitData(0, vec3(0), -1.0, false);
     }
 	for (int i = 0; i < NUMDIM; i++) {
 		if (whichPlane != i) {
 			coord[i] = origin[i] + maxT[whichPlane] *dir[i];
 			if (coord[i] < minB[i] || coord[i] > maxB[i]) {
-				return miss_col;
+		        return HitData(0, vec3(0), -1.0, false);
             }
 		} else {
 			coord[i] = candidatePlane[i];
 		}
     }
 
+    return HitData(whichPlane, coord, distance_squared(uniforms.eye, coord), true);
+}
+
+vec3 hit_texture(vec3 minB, int block_type, int plane, vec3 coord) {
     int face_size = imageSize(cubeMapArray).x;
-    vec3 uv = face_size * (coord - minB) / voxelSize;
+    vec3 uv = face_size * (coord - minB);
     vec3 st = face_size - uv;
-    int block_type = tree.data[10];
     int base_idx = block_type * 6;
-    if (whichPlane == XZ) {
+    if (plane == XZ) {
         if (coord[1] > minB.y) {
             // top
             return imageLoad(cubeMapArray, ivec3(uv.x,uv.z,base_idx+2)).xyz;
@@ -128,7 +162,7 @@ vec3 hit_aabb(vec3 ray) {
             // bottom
             return imageLoad(cubeMapArray, ivec3(st.x,st.z,base_idx+3)).xyz;
         }
-    } else if (whichPlane == YZ) {
+    } else if (plane == YZ) {
         if (coord[0] > minB.x) {
             // right
             return imageLoad(cubeMapArray, ivec3(st.z,st.y,base_idx)).xyz;
@@ -139,7 +173,7 @@ vec3 hit_aabb(vec3 ray) {
     } else {
         if (coord[2] > minB.z) {
             // back
-            return imageLoad(cubeMapArray, ivec3(uv.x,uv.y,base_idx+4)).xyz;
+            return imageLoad(cubeMapArray, ivec3(uv.x,st.y,base_idx+4)).xyz;
         } else {
             // front
             return imageLoad(cubeMapArray, ivec3(st.x,st.y,base_idx+5)).xyz;
@@ -147,11 +181,81 @@ vec3 hit_aabb(vec3 ray) {
     }
 }
 
+#define MAX_DEPTH 32
+
+vec3 hit_octree(vec3 ray) {
+    vec3 miss_col = vec3(1.0, 1.0, 1.0);
+    vec3 curr_origin = vec3(tree.data[1], tree.data[2], tree.data[3]);
+    int curr_size = tree.data[0];
+    int idx = 4;
+    float distances[MAX_DEPTH];
+    vec3 parent_origins[MAX_DEPTH];
+    int parent_idxs[MAX_DEPTH];
+    parent_origins[1] = curr_origin;
+    parent_idxs[1] = idx;
+    for (int i = 0; i < MAX_DEPTH; i++) {
+        distances[i] = -1.0;
+    }
+    int level = 1;
+    while (level > 0) {
+        float best = distances[level];
+        float nextBest;
+        HitData nextBestHitData;
+        int nextBestIdx;
+        vec3 nextBestOrigin;
+        bool assigned = false;
+        for (int i = 0; i < 8; i++) {
+            int child_idx = tree.data[idx+i];
+            if (child_idx != 0) {
+                int halfSize = curr_size / 2;
+                vec3 childOrigin = get_child_origin(i, curr_origin, halfSize);
+                HitData intersect = hit_aabc(ray, childOrigin, halfSize);
+                if (intersect.hit && intersect.dist > best) {
+                    if (!assigned) {
+                        assigned = true;
+                        nextBest = intersect.dist;
+                        nextBestIdx = child_idx;
+                        nextBestOrigin = childOrigin;
+                        nextBestHitData = intersect;
+                    } else if (intersect.dist < nextBest) {
+                        nextBest = intersect.dist;
+                        nextBestIdx = child_idx;
+                        nextBestOrigin = childOrigin;
+                        nextBestHitData = intersect;
+                    }
+                }
+            }
+        }
+        if (assigned) {
+            if (curr_size == 2) {
+                return hit_texture(nextBestOrigin, nextBestIdx, nextBestHitData.plane, nextBestHitData.coord);
+            } else {
+                distances[level] = nextBest;
+                level++;
+                if (level == 32) {
+                    return miss_col;
+                }
+                parent_origins[level] = curr_origin;
+                parent_idxs[level] = idx;
+                curr_origin = nextBestOrigin;
+                curr_size = curr_size / 2;
+                idx = nextBestIdx;
+            }
+        } else {
+            curr_origin = parent_origins[level];
+            curr_size = curr_size * 2;
+            idx = parent_idxs[level];
+            level--;
+        }
+    }
+    return miss_col;
+}
+
 void main() {
     float x = float(gl_GlobalInvocationID.x);
     float y = float(gl_GlobalInvocationID.y);
 
     vec3 ray = calculate_ray();
-    vec3 col = hit_aabb(ray);
+    vec3 col = hit_octree(ray);
     imageStore(img, ivec2(x, y), vec4(col, 1.0));
 }

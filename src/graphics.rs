@@ -245,9 +245,10 @@ impl Graphics {
         .unwrap();
 
         let mut tree = Octree::new();
-        tree.insert_leaf(11, [0, 0, -5]);
-        tree.insert_leaf(12, [1, 0, -5]);
-        // println!("{:?}", tree.serialize());
+        for i in 0..8 {
+            println!("{:?}", vec!([0 + i, 0 + i, -5 + i]));
+            tree.insert_leaf(9, [0 + i, 0 + i, -5 + i]);
+        }
 
         let octree_buffer = CpuAccessibleBuffer::from_iter(
             device.clone(),
