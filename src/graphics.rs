@@ -1,5 +1,5 @@
 use rand::{self, Rng};
-use std::{io::Cursor, sync::Arc};
+use std::{io::Cursor, sync::Arc, time::Instant};
 use vulkano::{
     buffer::{BufferUsage, CpuAccessibleBuffer},
     command_buffer::{
@@ -245,9 +245,9 @@ impl Graphics {
         )
         .unwrap();
         let mut tree = Octree::new();
-        for i in -5..5 {
-            for j in -5..5 {
-                for k in -5..5 {
+        for i in -50..50 {
+            for j in -50..50 {
+                for k in -50..50 {
                     let place_block = rand::thread_rng().gen_range(0..12);
                     if place_block == 0 {
                         tree.insert_leaf(5, [i, j, k]);
@@ -385,11 +385,13 @@ impl Graphics {
 
         let command_buffer = builder.build().unwrap();
 
+        let before = Instant::now();
         let render_future = future
             .then_execute(self.queue.clone(), command_buffer)
             .unwrap()
             .then_swapchain_present(self.queue.clone(), self.swapchain.clone(), next_image_idx)
             .then_signal_fence_and_flush();
+        println!("frame time: {}μs", before.elapsed().as_micros());
 
         match render_future {
             Ok(future) => {
