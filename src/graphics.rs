@@ -245,13 +245,12 @@ impl Graphics {
         )
         .unwrap();
         let mut tree = Octree::new();
-        for i in -50..50 {
-            for j in -50..50 {
-                for k in -50..50 {
-                    let place_block = rand::thread_rng().gen_range(0..8);
+        for i in -5..5 {
+            for j in -5..5 {
+                for k in -5..5 {
+                    let place_block = rand::thread_rng().gen_range(0..12);
                     if place_block == 0 {
-                        let block_type = rand::thread_rng().gen_range(1..15);
-                        tree.insert_leaf(block_type, [i, j, k]);
+                        tree.insert_leaf(5, [i, j, k]);
                     }
                 }
             }

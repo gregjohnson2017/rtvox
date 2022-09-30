@@ -181,10 +181,11 @@ vec3 hit_texture(vec3 minB, int block_type, int plane, vec3 coord) {
     }
 }
 
-#define MAX_DEPTH 32
+#define MAX_DEPTH 16
+#define DEBUG_OCTREE 1
 
 vec3 hit_octree(vec3 ray) {
-    vec3 miss_col = vec3(1.0, 1.0, 1.0);
+    vec3 miss_col = vec3(0.0, 0.0, 0.0);
     vec3 curr_origin = vec3(tree.data[1], tree.data[2], tree.data[3]);
     int curr_size = tree.data[0];
     int idx = 4;
@@ -197,7 +198,9 @@ vec3 hit_octree(vec3 ray) {
         distances[i] = -1.0;
     }
     int level = 1;
+    int iters = 0;
     while (level > 0) {
+        iters++;
         float best = distances[level];
         float nextBest;
         HitData nextBestHitData;
@@ -248,7 +251,11 @@ vec3 hit_octree(vec3 ray) {
             level--;
         }
     }
-    return miss_col;
+    if (DEBUG_OCTREE == 1) {
+        return miss_col + vec3(iters * 0.02,0.0,0.0);
+    } else {
+        return miss_col;
+    }
 }
 
 void main() {

@@ -35,7 +35,7 @@ fn main() {
         .build_vk_surface(&event_loop, instance.clone())
         .unwrap();
 
-    let mut camera = Camera::new([0.0, 0.0, 0.0], PI / 2.0);
+    let mut camera = Camera::new([0.0, 0.0, 15.0], PI / 2.0);
     let mut graphics = Graphics::new(surface, camera.get_camera_info()).unwrap();
     let mut mouse_1_held = false;
     let mut started_moving: Option<Instant> = None;
