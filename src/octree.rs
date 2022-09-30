@@ -144,13 +144,23 @@ impl<T: Copy + Into<i32>> Node<T> {
 
     fn add_down(&mut self, target_leaf: Box<Node<T>>) {
         if self.aabc.size > 2 {
-            let shrunken = self.aabc.shrink_towards(target_leaf.aabc.origin);
-            let n = Node::empty(shrunken.origin, shrunken.size);
-            let idx = self.add_child(n);
+            let idx = self.get_octant_idx(target_leaf.aabc);
             match &mut self.data {
                 NodeData::Children(ref mut children) => match children[idx] {
                     Some(ref mut child) => Self::add_down(child, target_leaf),
-                    None => unreachable!(),
+                    None => {
+                        let shrunken = self.aabc.shrink_towards(target_leaf.aabc.origin);
+                        let n = Node::empty(shrunken.origin, shrunken.size);
+                        let idx2 = self.add_child(n);
+                        // TODO how to do this in a smarter way
+                        match &mut self.data {
+                            NodeData::Children(ref mut children) => match children[idx2] {
+                                Some(ref mut child) => Self::add_down(child, target_leaf),
+                                None => unreachable!(),
+                            },
+                            NodeData::Value(_) => unreachable!(),
+                        }
+                    }
                 },
                 NodeData::Value(_) => unreachable!(),
             }
@@ -170,7 +180,7 @@ impl<T: Copy + Into<i32>> Node<T> {
         match self.data {
             NodeData::Children(ref mut children) => {
                 if children[idx].is_some() {
-                    panic!("attempted to overwrite leaf at {:?}", child.aabc)
+                    panic!("attempted to overwrite child at {:?}", child.aabc)
                 }
                 children[idx] = Some(child);
                 idx
@@ -683,5 +693,14 @@ mod tests {
         tree.insert_leaf(3, [2, 2, 2]);
         tree.insert_leaf(4, [4, 4, 4]);
         assert_eq!(52, tree.get_serialized_size());
+    }
+
+    #[test]
+    fn insert_pattern_shouldnt_panic() {
+        let mut tree = Octree::new();
+        tree.insert_leaf(12, [0, 0, -5]);
+        tree.insert_leaf(13, [1, 1, -4]);
+        tree.insert_leaf(14, [2, 2, -3]);
+        tree.insert_leaf(15, [3, 3, -2]);
     }
 }
