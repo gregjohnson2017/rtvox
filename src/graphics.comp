@@ -160,7 +160,7 @@ vec3 hit_texture(vec3 minB, int block_type, int plane, vec3 coord) {
             return imageLoad(cubeMapArray, ivec3(uv.x,uv.z,base_idx+2)).xyz;
         } else {
             // bottom
-            return imageLoad(cubeMapArray, ivec3(st.x,st.z,base_idx+3)).xyz;
+            return imageLoad(cubeMapArray, ivec3(uv.x,st.z,base_idx+3)).xyz;
         }
     } else if (plane == YZ) {
         if (coord[0] > minB.x) {
